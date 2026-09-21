@@ -20,12 +20,21 @@ export async function verifyAnswer({
   extractClaims = splitClaims,
 }: VerifyAnswerInput): Promise<AnswerVerification> {
   const claims = await extractClaims(answer);
+  const validEvidenceIds = new Set(evidence.map((item) => item.id));
 
   const verified = await Promise.all(
-    claims.map(async (claim, index) => ({
-      ...(await verifier.verify({ claim, evidence })),
-      index,
-    })),
+    claims.map(async (claim, index) => {
+      const result = await verifier.verify({ claim, evidence });
+      // Validate that returned evidenceIds only contain IDs present in supplied evidence
+      const safeEvidenceIds = (result.evidenceIds ?? []).filter((id) =>
+        validEvidenceIds.has(id),
+      );
+      return {
+        ...result,
+        evidenceIds: safeEvidenceIds,
+        index,
+      };
+    }),
   );
 
   return {

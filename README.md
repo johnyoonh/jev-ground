@@ -44,6 +44,10 @@ const result = await verifyAnswer({
   answer: "Acme was incorporated in Delaware in May 2018. It launched in 2019.",
   evidence: [
     {
+      id: "doc-1",
+      text: "Acme is headquartered in San Francisco with 100 employees.",
+    },
+    {
       id: "doc-17",
       text: "Acme was incorporated in Delaware in May 2018.",
     },
@@ -51,8 +55,14 @@ const result = await verifyAnswer({
   verifier,
 });
 
-console.log(result.verdict);
-console.log(result.claims);
+console.log(result.verdict); // "insufficient" (since 2019 launch is ungrounded)
+
+// Print individual claim results with attributed evidence citations
+for (const claim of result.claims) {
+  console.log(`Claim: "${claim.claim}"`);
+  console.log(`  Verdict: ${claim.verdict}`);
+  console.log(`  Citations (evidenceIds): ${claim.evidenceIds.join(", ") || "none"}`);
+}
 ```
 
 ## Design

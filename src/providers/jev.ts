@@ -1,4 +1,4 @@
-import { choice, TypeSafeClient } from "@typesafe-ai/sdk";
+import { choice, noul, TypeSafeClient } from "@typesafe-ai/sdk";
 import type {
   Verification,
   VerificationProbabilities,
@@ -52,6 +52,15 @@ export class JevVerifier implements Verifier {
   }
 
   async verify({ claim, evidence }: VerifyClaimInput): Promise<Verification> {
+    const validEvidenceIds = new Set(evidence.map((item) => item.id));
+
+    const evidenceQuestions: Record<string, ReturnType<typeof noul>> = {};
+    evidence.forEach((item, index) => {
+      evidenceQuestions[`ev_${index}`] = noul(
+        `Does evidence item '${item.id}' directly support or contradict the claim?`,
+      );
+    });
+
     const response = await this.client.systemOne({
       state: {
         claim,
@@ -63,12 +72,25 @@ export class JevVerifier implements Verifier {
           "Classify whether the claim is grounded in the supplied evidence. Judge only the evidence provided; do not rely on outside knowledge.",
           criteria,
         ),
+        ...evidenceQuestions,
       },
     });
 
     const answer = response.answers.factuality;
     const verdict = asVerdict(answer.choice);
     const probabilities = normalizeProbabilities(answer.probabilities);
+
+    let evidenceIds: string[] = [];
+
+    if (verdict !== "insufficient") {
+      evidenceIds = evidence
+        .filter((item, index) => {
+          const evAns = (response.answers as Record<string, any>)[`ev_${index}`];
+          return evAns && evAns.type === "noul" && evAns.noul > 0.5;
+        })
+        .map((item) => item.id)
+        .filter((id) => validEvidenceIds.has(id));
+    }
 
     return {
       claim,
@@ -81,7 +103,7 @@ export class JevVerifier implements Verifier {
           probabilities.contradicted,
           probabilities.insufficient,
         ),
-      evidenceIds: evidence.map((item) => item.id),
+      evidenceIds,
       provider: "jev",
       raw: answer,
     };
