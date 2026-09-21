@@ -9,6 +9,7 @@ import type {
 
 export interface JevVerifierOptions {
   client?: TypeSafeClient;
+  apiKey?: string;
   model?: string;
 }
 
@@ -47,7 +48,9 @@ export class JevVerifier implements Verifier {
   private readonly model?: string;
 
   constructor(options: JevVerifierOptions = {}) {
-    this.client = options.client ?? new TypeSafeClient();
+    const apiKey =
+      options.apiKey ?? process.env.TYPESAFE_API_KEY ?? "dummy_key";
+    this.client = options.client ?? new TypeSafeClient({ apiKey });
     this.model = options.model;
   }
 

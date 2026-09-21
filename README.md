@@ -1,5 +1,7 @@
 # jev-ground
 
+[![CI](https://github.com/typesafe-ai/jev-ground/actions/workflows/ci.yml/badge.svg)](https://github.com/typesafe-ai/jev-ground/actions/workflows/ci.yml)
+
 Evidence-grounded factuality verification for LLM and agent outputs.
 
 `jev-ground` turns claims plus evidence into typed verification results:
