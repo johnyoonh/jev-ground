@@ -197,6 +197,15 @@ const verifier = new CachedVerifier(new RetryingVerifier(jev), {
 The default `npm run benchmark` uses an offline mock. Paid CLI calls now
 require `--verifier jev --live`. No benchmark accuracy is implied by mock runs.
 
+## Resumable model evaluation
+
+Use node scripts/run_evaluation.mjs with --live for billed evaluations.
+It runs an uncached model preflight, bounds concurrency, and checkpoints
+successful results. Pass --resume on the same data and model/rubric fingerprint
+after interruption. Keep checkpoint data private: it contains source evidence.
+
+See [evaluation datasets](docs/evaluation-datasets.md) for setup and licenses.
+
 ## Development
 
 ```bash
