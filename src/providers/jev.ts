@@ -5,11 +5,20 @@ import type {
   VerificationVerdict, VerifyClaimInput,
 } from "../types.js";
 
+export type JevResponseIssue =
+  | "MISSING_ANSWER"
+  | "INVALID_RESPONSE"
+  | "MALFORMED_PROBABILITIES"
+  | "LABEL_MISMATCH";
+
+/** Structured schema errors. Transport/API failures remain distinct and retryable. */
 export class InvalidJevResponseError extends Error {
   readonly code = "JEV_RESPONSE_INVALID";
-  constructor(message: string) {
+  readonly reason: JevResponseIssue;
+  constructor(message: string, reason: JevResponseIssue = "INVALID_RESPONSE") {
     super(message);
     this.name = "InvalidJevResponseError";
+    this.reason = reason;
   }
 }
 
@@ -37,6 +46,15 @@ export const JEV_RUBRIC_FINGERPRINT = createHash("sha256")
   }))
   .digest("hex");
 
+/** Namespace for pinned Jev model and exact rubric revision. */
+export function getJevCacheNamespace(
+  model: string,
+  rubricFingerprint: string = JEV_RUBRIC_FINGERPRINT,
+): string {
+  if (!model.trim() || !rubricFingerprint.trim()) throw new TypeError("Model and rubric fingerprint required");
+  return "jev:" + model + ":grounding:" + rubricFingerprint;
+}
+
 const VERDICTS: VerificationVerdict[] = ["supported", "contradicted", "insufficient"];
 const CHOICE_SUM_TOLERANCE = 0.01;
 type UnknownRecord = Record<string, unknown>;
@@ -47,7 +65,8 @@ function record(value: unknown): UnknownRecord | undefined {
 }
 function ensureProbability(value: unknown, field: string): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
-    throw new InvalidJevResponseError("Invalid probability: " + field);
+    throw new InvalidJevResponseError("Invalid probability: " + field,
+      field === "confidence" || field.startsWith("ev_") ? "INVALID_RESPONSE" : "MALFORMED_PROBABILITIES");
   }
   return value;
 }
@@ -59,12 +78,13 @@ function readChoice(value: unknown, questionId: string): {
   const answer = record(value);
   if (!answer || answer.type !== "choice" ||
       !VERDICTS.includes(answer.choice as VerificationVerdict)) {
-    throw new InvalidJevResponseError("Invalid choice response for " + questionId);
+    throw new InvalidJevResponseError("Invalid choice response for " + questionId,
+      !answer ? "MISSING_ANSWER" : "INVALID_RESPONSE");
   }
   const probs = record(answer.probabilities);
   if (!probs || Object.keys(probs).length !== VERDICTS.length ||
       !VERDICTS.every(key => Object.hasOwn(probs, key))) {
-    throw new InvalidJevResponseError("Incomplete choice probabilities for " + questionId);
+    throw new InvalidJevResponseError("Incomplete choice probabilities for " + questionId, "MALFORMED_PROBABILITIES");
   }
   const probabilities: VerificationProbabilities = {
     supported: ensureProbability(probs.supported, "supported"),
@@ -73,12 +93,12 @@ function readChoice(value: unknown, questionId: string): {
   };
   const sum = probabilities.supported + probabilities.contradicted + probabilities.insufficient;
   if (Math.abs(sum - 1) > CHOICE_SUM_TOLERANCE) {
-    throw new InvalidJevResponseError("Choice probabilities do not sum to 1 for " + questionId);
+    throw new InvalidJevResponseError("Choice probabilities do not sum to 1 for " + questionId, "MALFORMED_PROBABILITIES");
   }
   const verdict = answer.choice as VerificationVerdict;
   const maximum = Math.max(...VERDICTS.map(key => probabilities[key]));
   if (probabilities[verdict] + 0.000001 < maximum) {
-    throw new InvalidJevResponseError("Selected choice disagrees with probabilities for " + questionId);
+    throw new InvalidJevResponseError("Selected choice disagrees with probabilities for " + questionId, "LABEL_MISMATCH");
   }
   const confidence = ensureProbability(answer.confidence, "confidence");
   return { verdict, probabilities, confidence };
@@ -117,7 +137,7 @@ export class JevVerifier implements BatchVerifier {
         !Number.isInteger(this.maxChars) || this.maxChars < 1) {
       throw new RangeError("Invalid Jev request limits");
     }
-    this.cacheNamespace = "jev:" + this.model + ":grounding:" + JEV_RUBRIC_FINGERPRINT;
+    this.cacheNamespace = getJevCacheNamespace(this.model);
   }
 
   private getClient(): TypeSafeClient {
@@ -199,8 +219,11 @@ export class JevVerifier implements BatchVerifier {
       questions,
     }, { retry: { maxRetries: 0 } });
     const answers = record(response.answers);
-    if (!answers || !record(response) || typeof response.model !== "string" || !response.model.trim()) {
-      throw new InvalidJevResponseError("Malformed Jev response envelope");
+    if (!answers) {
+      throw new InvalidJevResponseError("Jev response contains no answers", "MISSING_ANSWER");
+    }
+    if (!record(response) || typeof response.model !== "string" || !response.model.trim()) {
+      throw new InvalidJevResponseError("Malformed Jev response envelope", "INVALID_RESPONSE");
     }
     const results: Verification[] = [];
     for (let index = 0; index < inputs.length; index++) {
@@ -212,7 +235,7 @@ export class JevVerifier implements BatchVerifier {
           const key = single ? "ev_" + j : "ev_" + index + "_" + j;
           const evAnswer = record(answers[key]);
           if (!evAnswer || evAnswer.type !== "noul") {
-            throw new InvalidJevResponseError("Missing evidence attribution answer: " + key);
+            throw new InvalidJevResponseError("Missing evidence attribution answer: " + key, "MISSING_ANSWER");
           }
           if (ensureProbability(evAnswer.noul, key) >= 0.5) evidenceIds.push(evidence[j].id);
         }
