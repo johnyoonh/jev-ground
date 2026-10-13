@@ -5,7 +5,7 @@ import { performance } from "node:perf_hooks";
 import type { Verifier } from "../types.js";
 import { loadJsonlDataset } from "./dataset.js";
 import {
-  aggregateTokenCost, computeClassMetrics, computeConfusionMatrix, computeLatencyMetrics,
+  aggregateTokenCost, computeCalibrationMetrics, computeClassMetrics, computeConfusionMatrix, computeLatencyMetrics,
 } from "./metrics.js";
 import type {
   BenchmarkItem, BenchmarkOptions, BenchmarkPrediction, BenchmarkResult,
@@ -182,9 +182,22 @@ export async function runReliableBenchmark(
   const scored = predictions.filter(p => p.verification && !p.error).length;
   const confusionMatrix = computeConfusionMatrix(predictions);
   const { accuracy, perClassMetrics, macroMetrics } = computeClassMetrics(confusionMatrix);
+  const failed = predictions.length - scored;
+  const calibration = computeCalibrationMetrics(predictions);
+  const cached = predictions.filter(p => p.verification?.cacheHit === true).map(p => p.latencyMs);
+  const uncached = predictions.filter(p => p.verification?.cacheHit !== true && !p.error).map(p => p.latencyMs);
+  const errorBreakdown: Record<string, number> = {};
+  for (const p of predictions.filter(p => p.error || !p.verification)) {
+    const reason = p.error?.split(":")[0] ?? "MissingVerification";
+    errorBreakdown[reason] = (errorBreakdown[reason] ?? 0) + 1;
+  }
   const result: ReliableBenchmarkResult = {
     timestamp: new Date().toISOString(), verifierName: name, datasetSize: items.length,
-    scored, failed: predictions.length - scored, runFingerprint: fingerprint,
+    scored, failed, failureRate: failed / items.length, errorBreakdown,
+    ...(calibration ? { calibration } : {}),
+    ...(cached.length ? { cachedLatency: computeLatencyMetrics(cached) } : {}),
+    ...(uncached.length ? { uncachedLatency: computeLatencyMetrics(uncached) } : {}),
+    runFingerprint: fingerprint,
     resumed, preflightIndex, accuracy, perClassMetrics, macroMetrics,
     confusionMatrix, latency: computeLatencyMetrics(predictions.map(p => p.latencyMs)),
     ...(aggregateTokenCost(predictions)

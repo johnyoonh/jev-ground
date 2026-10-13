@@ -29,6 +29,11 @@ export interface LatencyMetrics {
   p95Ms: number;
 }
 
+export interface CalibrationMetrics {
+  ece: number;
+  brierScore: number;
+}
+
 export interface TokenCostMetrics {
   promptTokens?: number;
   completionTokens?: number;
@@ -55,6 +60,12 @@ export interface BenchmarkResult {
   datasetSize: number;
   scored: number;
   failed: number;
+  failureRate?: number;
+  throughput?: number;
+  errorBreakdown?: Record<string, number>;
+  calibration?: CalibrationMetrics;
+  cachedLatency?: LatencyMetrics;
+  uncachedLatency?: LatencyMetrics;
   accuracy: number;
   macroMetrics: {
     precision: number;

@@ -1,6 +1,7 @@
 import type { VerificationVerdict } from "../types.js";
 import type {
   BenchmarkPrediction,
+  CalibrationMetrics,
   ClassMetrics,
   ConfusionMatrix,
   LatencyMetrics,
@@ -109,6 +110,83 @@ export function computeClassMetrics(confusionMatrix: ConfusionMatrix): {
     },
     accuracy: roundToFourDecimals(accuracy),
     totalSamples,
+  };
+}
+
+export function computeCalibrationMetrics(
+  predictions: BenchmarkPrediction[],
+): CalibrationMetrics | undefined {
+  const scored = predictions.filter((p) => !p.error && p.verification);
+  if (scored.length === 0) {
+    return undefined;
+  }
+
+  let totalBrier = 0;
+  for (const pred of scored) {
+    const gold = pred.item.goldVerdict;
+    const probs = pred.verification!.probabilities;
+
+    for (const v of VERDICTS) {
+      const p_v =
+        probs && typeof probs[v] === "number"
+          ? probs[v]
+          : pred.verification!.verdict === v
+            ? 1
+            : 0;
+      const y_v = gold === v ? 1 : 0;
+      totalBrier += (p_v - y_v) ** 2;
+    }
+  }
+  const brierScore = totalBrier / scored.length;
+
+  const numBins = 10;
+  const binCounts = new Array<number>(numBins).fill(0);
+  const binAccSums = new Array<number>(numBins).fill(0);
+  const binConfSums = new Array<number>(numBins).fill(0);
+
+  for (const pred of scored) {
+    const gold = pred.item.goldVerdict;
+    const probs = pred.verification!.probabilities;
+
+    let conf = pred.verification!.confidence;
+    if (typeof conf !== "number" || Number.isNaN(conf)) {
+      if (probs) {
+        conf = Math.max(
+          probs.supported ?? 0,
+          probs.contradicted ?? 0,
+          probs.insufficient ?? 0,
+        );
+      } else {
+        conf = 1.0;
+      }
+    }
+
+    const isCorrect = pred.verification!.verdict === gold ? 1 : 0;
+
+    let binIdx = Math.floor(conf * numBins);
+    if (binIdx >= numBins) {
+      binIdx = numBins - 1;
+    } else if (binIdx < 0) {
+      binIdx = 0;
+    }
+
+    binCounts[binIdx] += 1;
+    binAccSums[binIdx] += isCorrect;
+    binConfSums[binIdx] += conf;
+  }
+
+  let ece = 0;
+  for (let b = 0; b < numBins; b++) {
+    if (binCounts[b] > 0) {
+      const avgAcc = binAccSums[b] / binCounts[b];
+      const avgConf = binConfSums[b] / binCounts[b];
+      ece += (binCounts[b] / scored.length) * Math.abs(avgAcc - avgConf);
+    }
+  }
+
+  return {
+    ece: roundToFourDecimals(ece),
+    brierScore: roundToFourDecimals(brierScore),
   };
 }
 

@@ -5,6 +5,7 @@ import { loadJsonlDataset } from "./dataset.js";
 import {
   aggregateTokenCost,
   computeClassMetrics,
+  computeCalibrationMetrics,
   computeConfusionMatrix,
   computeLatencyMetrics,
   VERDICTS,
@@ -32,6 +33,7 @@ export async function runBenchmark({
 
   const predictions: BenchmarkPrediction[] = [];
   const latencies: number[] = [];
+  const startRun = performance.now();
 
   for (const item of items) {
     const startTime = performance.now();
@@ -66,14 +68,31 @@ export async function runBenchmark({
   const { perClassMetrics, macroMetrics, accuracy } =
     computeClassMetrics(confusionMatrix);
   const latency = computeLatencyMetrics(latencies);
+  const success = predictions.filter(p => p.verification && !p.error);
+  const failures = predictions.filter(p => p.error || !p.verification);
+  const calibration = computeCalibrationMetrics(predictions);
+  const errorBreakdown: Record<string, number> = {};
+  for (const p of failures) {
+    const reason = p.error?.split(":")[0] ?? "MissingVerification";
+    errorBreakdown[reason] = (errorBreakdown[reason] ?? 0) + 1;
+  }
+  const cached = success.filter(p => p.verification?.cacheHit === true).map(p => p.latencyMs);
+  const uncached = success.filter(p => p.verification?.cacheHit !== true).map(p => p.latencyMs);
+  const seconds = (performance.now() - startRun) / 1000;
   const tokenCost = aggregateTokenCost(predictions);
 
   const result: BenchmarkResult = {
     timestamp: new Date().toISOString(),
     verifierName: resolvedName,
     datasetSize: items.length,
-    scored: predictions.filter((p) => p.verification && !p.error).length,
-    failed: predictions.filter((p) => !!p.error || !p.verification).length,
+    scored: success.length,
+    failed: failures.length,
+    failureRate: items.length ? failures.length / items.length : 0,
+    throughput: seconds > 0 ? items.length / seconds : 0,
+    errorBreakdown,
+    ...(calibration ? { calibration } : {}),
+    ...(cached.length ? { cachedLatency: computeLatencyMetrics(cached) } : {}),
+    ...(uncached.length ? { uncachedLatency: computeLatencyMetrics(uncached) } : {}),
     accuracy,
     macroMetrics,
     perClassMetrics,
@@ -101,12 +120,13 @@ export function formatConsoleSummary(result: BenchmarkResult): string {
   lines.push("=================================================");
   lines.push(`Timestamp:    ${result.timestamp}`);
   lines.push(`Dataset Size: ${result.datasetSize} samples`);
-  lines.push(`Scored: ${result.scored} | Provider failures: ${result.failed}`);
+  lines.push(`Scored: ${result.scored} | Provider failures: ${result.failed} | Failure rate: ${((result.failureRate ?? 0)*100).toFixed(1)}%`);
   lines.push(result.scored > 0 ? `Accuracy:     ${(result.accuracy * 100).toFixed(2)}%` : "Accuracy:     N/A (no valid model predictions)");
   lines.push(
     `Macro Avg:    Precision: ${(result.macroMetrics.precision * 100).toFixed(2)}% | Recall: ${(result.macroMetrics.recall * 100).toFixed(2)}% | F1: ${(result.macroMetrics.f1 * 100).toFixed(2)}%`,
   );
   lines.push("");
+  if (result.calibration) lines.push(`Calibration: ECE ${result.calibration.ece.toFixed(4)} | Brier ${result.calibration.brierScore.toFixed(4)}`);
   lines.push("--- Per-Class Metrics ---");
   lines.push(
     `${"Class".padEnd(14)} | ${"Precision".padStart(9)} | ${"Recall".padStart(9)} | ${"F1".padStart(9)} | ${"Support".padStart(7)}`,
