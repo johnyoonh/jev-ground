@@ -60,6 +60,7 @@ function parseArgs(args: string[]) {
     output?: string;
     verifierType: "mock" | "jev";
     help?: boolean;
+    live?: boolean;
   } = {
     dataset: "fixtures/benchmark-fixture.jsonl",
     verifierType: "mock",
@@ -78,6 +79,8 @@ function parseArgs(args: string[]) {
       } else {
         throw new Error(`Unknown verifier type: ${v}. Choose 'mock' or 'jev'.`);
       }
+    } else if (arg === "--live") {
+      options.live = true;
     } else if (arg === "--help" || arg === "-h") {
       options.help = true;
     }
@@ -97,6 +100,7 @@ Options:
   -d, --dataset <path>   Path to JSONL dataset file (default: fixtures/benchmark-fixture.jsonl)
   -o, --output <path>    Path to save output JSON results
   -v, --verifier <type>  Verifier to benchmark: 'mock' or 'jev' (default: mock)
+      --live             Explicit opt-in required for paid Jev requests
   -h, --help             Show this help message
 `);
 }
@@ -126,6 +130,8 @@ export async function main() {
     let verifierName: string;
 
     if (options.verifierType === "jev") {
+      if (!options.live) throw new Error("Jev requests are billable; pass --live to opt in.");
+      if (!process.env.TYPESAFE_API_KEY) throw new Error("TYPESAFE_API_KEY required for --live.");
       verifier = new JevVerifier();
       verifierName = "JevVerifier";
     } else {
