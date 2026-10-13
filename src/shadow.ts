@@ -34,6 +34,13 @@ export class ShadowVerifier implements Verifier {
     return [...this.traces];
   }
 
+  /** Shadow telemetry must not change verification results or turn provider errors into new ones. */
+  private async captureTrace(trace: DecisionTrace): Promise<void> {
+    this.traces.push(trace);
+    try { await this.options.traceSink?.record(trace); } catch { /* best-effort telemetry */ }
+    try { await this.options.onTrace?.(trace); } catch { /* best-effort telemetry */ }
+  }
+
   async verify(input: VerifyClaimInput): Promise<Verification> {
     const start = Date.now();
     const requestId = this.options.generateRequestId?.() ?? randomUUID();
@@ -52,10 +59,6 @@ export class ShadowVerifier implements Verifier {
     } catch (err) {
       errorClass = err instanceof Error ? err.name || "Error" : "UnknownError";
       const durationMs = Date.now() - start;
-      const evaluation = evaluatePolicy(this.options.policy, {
-        probabilities: { supported: 0, contradicted: 0, insufficient: 1 },
-      });
-
       const errorTrace: DecisionTrace = redactSecrets({
         requestId,
         correlationId: this.options.correlationId,
@@ -66,16 +69,16 @@ export class ShadowVerifier implements Verifier {
         model: this.options.model ?? "unknown",
         rubricVersion: this.options.policy.rubricVersion,
         policyId: this.options.policy.id,
-        probabilities: { supported: 0, contradicted: 0, insufficient: 1 },
-        policyDecision: evaluation.decision,
-        reasons: [...evaluation.reasons, `Error during verification: ${errorClass}`],
-        escalationPath: evaluation.escalationPath,
-        fallbackPath: evaluation.fallbackPath,
+        // Execution failures are NOT factuality classifications.
+        policyDecision: "REVIEW",
+        reasons: [`Provider error: ${errorClass}`],
+        escalationPath: this.options.policy.escalationPaths?.REVIEW ?? "flag_for_audit",
+        fallbackPath: this.options.policy.fallbackPath,
         timestamp: new Date().toISOString(),
         durationMs,
         cacheHit: false,
         errorClass,
-        metadata: this.options.metadata,
+        metadata: this.options.verbose ? this.options.metadata : undefined,
         ...(this.options.verbose
           ? {
               rawClaim: input.claim,
@@ -84,9 +87,7 @@ export class ShadowVerifier implements Verifier {
           : {}),
       });
 
-      this.traces.push(errorTrace);
-      await this.options.traceSink?.record(errorTrace);
-      await this.options.onTrace?.(errorTrace);
+      await this.captureTrace(errorTrace);
 
       throw err;
     }
@@ -128,8 +129,8 @@ export class ShadowVerifier implements Verifier {
       evidenceHashes,
       allowedEvidenceIds,
       provider: verification.provider ?? this.options.provider ?? "unknown",
-      model: this.options.model ?? "unknown",
-      rubricVersion: this.options.policy.rubricVersion,
+      model: verification.model ?? this.options.model ?? "unknown",
+      rubricVersion: verification.rubricFingerprint ?? this.options.policy.rubricVersion,
       policyId: this.options.policy.id,
       probabilities: verification.probabilities,
       policyDecision: evaluation.decision,
@@ -144,7 +145,7 @@ export class ShadowVerifier implements Verifier {
       errorClass: null,
       verdict: verification.verdict,
       confidence: verification.confidence,
-      metadata: this.options.metadata,
+      metadata: this.options.verbose ? this.options.metadata : undefined,
       ...(this.options.verbose
         ? {
             rawClaim: input.claim,
@@ -153,9 +154,7 @@ export class ShadowVerifier implements Verifier {
         : {}),
     });
 
-    this.traces.push(trace);
-    await this.options.traceSink?.record(trace);
-    await this.options.onTrace?.(trace);
+    await this.captureTrace(trace);
 
     // Shadow mode NEVER modifies or blocks the original verifier result!
     return verification;

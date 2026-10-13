@@ -6,6 +6,12 @@ export function replayPolicyOnTrace(
   trace: DecisionTrace,
   policy: PolicyConfig,
 ): DecisionTrace {
+  // Provider errors and missing probabilities are execution states, not factuality.
+  if (trace.errorClass || !trace.probabilities) return {
+    ...trace, policyId: policy.id, rubricVersion: policy.rubricVersion,
+    policyDecision: "REVIEW", reasons: ["Cannot replay factuality: provider execution failed"],
+    escalationPath: policy.escalationPaths?.REVIEW ?? "flag_for_audit",
+  };
   const evaluation = evaluatePolicy(policy, {
     probabilities: trace.probabilities,
     verdict: trace.verdict,
@@ -58,6 +64,9 @@ export interface PolicyComparisonReport {
     decisionChangesCount: number;
     falsePasses: number;
     falseFails: number;
+    labeledCount: number;
+    newPassesWithoutGold: number;
+    newNonPassesWithoutGold: number;
     reviewRateA: number;
     reviewRateB: number;
     reviewRateDelta: number;
@@ -91,6 +100,9 @@ export function comparePolicySnapshots(
   let falsePasses = 0;
   let falseFails = 0;
   let decisionChangesCount = 0;
+  let labeledCount = 0;
+  let newPassesWithoutGold = 0;
+  let newNonPassesWithoutGold = 0;
 
   for (const trace of traces) {
     const traceA = replayPolicyOnTrace(trace, policyA);
@@ -116,8 +128,10 @@ export function comparePolicySnapshots(
     }
 
     // False pass / false fail calculation
-    const gold = goldVerdicts?.[trace.requestId] ?? goldVerdicts?.[trace.claimHash];
+    const gold = trace.errorClass ? undefined :
+      (goldVerdicts?.[trace.requestId] ?? goldVerdicts?.[trace.claimHash]);
     if (gold !== undefined) {
+      labeledCount++;
       // Gold truth available
       const isGoldSupported = gold === "supported";
       // False pass: Candidate policy (B) passed, but gold is NOT supported
@@ -132,11 +146,11 @@ export function comparePolicySnapshots(
       // Relative comparison between Policy A and Policy B
       // False pass: Policy A was FAIL or REVIEW, but Policy B passed
       if (decA !== "PASS" && decB === "PASS") {
-        falsePasses++;
+        newPassesWithoutGold++;
       }
       // False fail: Policy A was PASS, but Policy B was FAIL or REVIEW
       if (decA === "PASS" && decB !== "PASS") {
-        falseFails++;
+        newNonPassesWithoutGold++;
       }
     }
   }
@@ -158,6 +172,9 @@ export function comparePolicySnapshots(
       decisionChangesCount,
       falsePasses,
       falseFails,
+      labeledCount,
+      newPassesWithoutGold,
+      newNonPassesWithoutGold,
       reviewRateA,
       reviewRateB,
       reviewRateDelta,

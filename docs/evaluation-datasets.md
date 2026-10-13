@@ -35,7 +35,7 @@ python3 -m unittest discover -s test -p 'test_prepare_eval.py' -v
 export TYPESAFE_API_KEY="..."
 node scripts/run_evaluation.mjs \
   --dataset data/normalized/averitec-dev-60.jsonl \
-  --max-examples 20 \
+  --model jev-1.13.0 --max-examples 20 \
   --cache-dir .cache/jev-ground \
   --output data/reports/averitec-jev.json \
   --live
@@ -133,6 +133,23 @@ runs. Verify TypeSafe model compatibility and API credentials yourself.
 Accuracy from cached results is valid, but latency measured during cache
 hits must be reported separately from uncached provider latency.
 
+## Preflight and resumability
+
+Live evaluation now performs exactly one uncached, representative model/schema
+preflight before bulk work. Authentication or malformed Jev answers abort first.
+The TypeSafe SDK built-in retries are disabled; RetryingVerifier is the only
+retry owner. Concurrency is bounded (default 4; --concurrency configures it).
+
+Runs write a private JSONL checkpoint at <output>.checkpoint.jsonl by default.
+If interrupted, repeat the same command with --resume. The dataset, verifier
+name, pinned model and rubric fingerprint must match. Successful cases are
+reused without new API calls; previously failed cases are attempted again.
+An uncached preflight still runs for the first unfinished case.
+
+**Privacy:** checkpoints contain plaintext claim and evidence content. Store
+them in an ignored/private directory. Do not publish checkpoint JSONL.
+**Billing:** max-examples is not a hard provider-side dollar/token cap.
+
 ## Evaluation protocol
 
 1. Verify a small dev sample manually; inspect class mappings and evidence.
@@ -145,6 +162,6 @@ hits must be reported separately from uncached provider latency.
 5. Keep provider/version, prompt/rubric version, sampling policy,
    timeout/retry configuration, and cache-hit stats in the report.
 
-The repository's current benchmark PR #9 produces basic precision/recall/F1
-and latency. Calibration and statistically correct handling of failed calls
-require additional work; do not overinterpret the first results.
+The integrated benchmark reports basic precision/recall/F1 and latency.
+Failed API calls are excluded from class metrics. More calibration and
+cached/uncached latency work is still needed.

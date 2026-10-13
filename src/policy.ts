@@ -65,6 +65,22 @@ export function evaluatePolicy(
     ...policy.thresholds,
   };
 
+  // Never silently PASS on NaN, missing classes, or malformed evaluator output.
+  const values = [
+    input.probabilities.supported,
+    input.probabilities.contradicted,
+    input.probabilities.insufficient,
+  ];
+  if (values.some(v => typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > 1) ||
+      Math.abs(values.reduce((sum, v) => sum + v, 0) - 1) > 0.02) {
+    throw new TypeError("Invalid three-class policy probability distribution");
+  }
+  for (const [key, threshold] of Object.entries(thresholds)) {
+    if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
+      throw new RangeError("Invalid policy threshold: " + key);
+    }
+  }
+
   const escalationPaths: Required<PolicyEscalationPaths> = {
     ...DEFAULT_POLICY_ESCALATION_PATHS,
     ...policy.escalationPaths,

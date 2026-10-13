@@ -4,6 +4,7 @@ export * from "./aggregate.js";
 export * from "./verify.js";
 export * from "./providers/jev.js";
 export * from "./resilience/index.js";
+export * from "./benchmark/index.js";
 export * from "./policy.js";
 export * from "./trace.js";
 export * from "./shadow.js";

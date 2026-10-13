@@ -1,4 +1,4 @@
-import type { Verification, Verifier, VerifyClaimInput } from "../types.js";
+import type { BatchVerifier, Verification, Verifier, VerifyClaimInput } from "../types.js";
 
 export interface RetryOptions {
   maxAttempts?: number;
@@ -33,7 +33,9 @@ export function isTransientError(error: unknown): boolean {
   const status = statusOf(error);
   if (status !== undefined) return RETRYABLE_STATUS.has(status);
   const code = codeOf(error);
-  return code !== undefined && RETRYABLE_CODE.has(code);
+  if (code !== undefined && RETRYABLE_CODE.has(code)) return true;
+  const name = asRecord(error)?.name;
+  return name === "APIConnectionError" || name === "APITimeoutError";
 }
 function retryAfterMs(error: unknown, nowMs: number): number | undefined {
   const record = asRecord(error);
@@ -52,7 +54,7 @@ function retryAfterMs(error: unknown, nowMs: number): number | undefined {
   const date = Date.parse(input);
   return Number.isNaN(date) ? undefined : Math.max(0, date - nowMs);
 }
-export class RetryingVerifier implements Verifier {
+export class RetryingVerifier implements BatchVerifier {
   readonly stats = { calls: 0, attempts: 0, retries: 0 };
   private readonly options: Required<Pick<RetryOptions,
     "maxAttempts" | "baseDelayMs" | "maxDelayMs" | "random" | "sleep" | "shouldRetry"
@@ -75,11 +77,22 @@ export class RetryingVerifier implements Verifier {
     }
   }
   async verify(input: VerifyClaimInput): Promise<Verification> {
+    return this.withRetries(() => this.delegate.verify(input));
+  }
+  async verifyMany(inputs: VerifyClaimInput[]): Promise<Verification[]> {
+    if (inputs.length === 0) return [];
+    const batch = (this.delegate as Partial<BatchVerifier>).verifyMany;
+    if (typeof batch !== "function") {
+      return Promise.all(inputs.map(input => this.verify(input)));
+    }
+    return this.withRetries(() => batch.call(this.delegate, inputs));
+  }
+  private async withRetries<T>(operation: () => Promise<T>): Promise<T> {
     this.stats.calls++;
     for (let attempt = 1; attempt <= this.options.maxAttempts; attempt++) {
       this.stats.attempts++;
       try {
-        return await this.delegate.verify(input);
+        return await operation();
       } catch (error) {
         if (attempt === this.options.maxAttempts || !this.options.shouldRetry(error)) throw error;
         const exponential = Math.min(this.options.maxDelayMs,

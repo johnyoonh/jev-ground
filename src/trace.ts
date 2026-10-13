@@ -14,7 +14,8 @@ export interface DecisionTrace {
   model: string;
   rubricVersion: string;
   policyId: string;
-  probabilities: VerificationProbabilities;
+  /** Absent on provider errors: never synthesize insufficient on failure. */
+  probabilities?: VerificationProbabilities;
   policyDecision: PolicyDecision;
   reasons: string[];
   escalationPath: string;
@@ -94,7 +95,7 @@ export function parseJsonlTraces(jsonlContent: string): DecisionTrace[] {
       typeof parsed.requestId !== "string" ||
       typeof parsed.claimHash !== "string" ||
       !Array.isArray(parsed.evidenceHashes) ||
-      !parsed.probabilities ||
+      (!parsed.probabilities && !parsed.errorClass) ||
       typeof parsed.policyDecision !== "string"
     ) {
       throw new Error("Invalid DecisionTrace line in JSONL");
@@ -138,8 +139,9 @@ export class FileTraceSink implements TraceSink {
 
   async record(trace: DecisionTrace): Promise<void> {
     const dir = path.dirname(this.filePath);
-    await fs.mkdir(dir, { recursive: true });
+    await fs.mkdir(dir, { recursive: true, mode: 0o700 });
     const line = exportTraceToJsonlLine(trace) + "\n";
-    await fs.appendFile(this.filePath, line, "utf8");
+    await fs.appendFile(this.filePath, line, { encoding: "utf8", mode: 0o600 });
+    if (process.platform !== "win32") await fs.chmod(this.filePath, 0o600);
   }
 }

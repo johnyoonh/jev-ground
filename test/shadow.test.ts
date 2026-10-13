@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PolicyConfig } from "../src/policy.js";
-import { ShadowVerifier } from "../src/shadow.ts";
+import { ShadowVerifier } from "../src/shadow.js";
 import { MemoryTraceSink } from "../src/trace.js";
 import type { Verification, Verifier } from "../src/types.js";
 

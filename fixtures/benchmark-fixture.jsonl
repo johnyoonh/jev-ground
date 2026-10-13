@@ -1,0 +1,6 @@
+{"id":"sample-1","claim":"Acme Corp was incorporated in Delaware in May 2018.","evidence":[{"id":"doc-101","text":"Acme Corp was incorporated in Delaware in May 2018."}],"goldVerdict":"supported"}
+{"id":"sample-2","claim":"Acme Corp was founded in 2020.","evidence":[{"id":"doc-101","text":"Acme Corp was incorporated in Delaware in May 2018."}],"goldVerdict":"contradicted"}
+{"id":"sample-3","claim":"Acme Corp has its headquarters in Seattle.","evidence":[{"id":"doc-101","text":"Acme Corp was incorporated in Delaware in May 2018."}],"goldVerdict":"insufficient"}
+{"id":"sample-4","claim":"Beta LLC launched its product in 2021.","evidence":[{"id":"doc-102","text":"Beta LLC launched its software product in 2021 after two years of beta testing."}],"goldVerdict":"supported"}
+{"id":"sample-5","claim":"Gamma Inc reported $10M revenue in 2022.","evidence":[{"id":"doc-103","text":"Gamma Inc reported revenue of $5M in fiscal year 2022."}],"goldVerdict":"contradicted"}
+{"id":"sample-6","claim":"Delta Corp was acquired in 2023.","evidence":[],"goldVerdict":"insufficient"}
