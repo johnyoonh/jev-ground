@@ -1,161 +1,182 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
-import type { Verifier } from "../types.js";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { performance } from "node:perf_hooks";
+import { loadJsonlDataset } from "./dataset.js";
 import {
-  buildCategoryMetrics,
-  buildConfusionMatrix,
-  calculateMacroMetrics,
-  evaluateMetamorphicChecks,
-} from "./eval.js";
+  aggregateTokenCost,
+  computeClassMetrics,
+  computeCalibrationMetrics,
+  computeConfusionMatrix,
+  computeLatencyMetrics,
+  VERDICTS,
+} from "./metrics.js";
 import type {
   BenchmarkItem,
-  BenchmarkReport,
-  CasePrediction,
-  RegressionThresholds,
+  BenchmarkOptions,
+  BenchmarkPrediction,
+  BenchmarkResult,
 } from "./types.js";
 
-export async function loadJsonlDataset(filePath: string): Promise<BenchmarkItem[]> {
-  const content = await readFile(filePath, "utf-8");
-  const lines = content.split("\n").filter((line) => line.trim().length > 0);
-  const items: BenchmarkItem[] = [];
+export async function runBenchmark({
+  verifier,
+  dataset,
+  verifierName,
+  outputPath,
+}: BenchmarkOptions): Promise<BenchmarkResult> {
+  const items: BenchmarkItem[] =
+    typeof dataset === "string" ? await loadJsonlDataset(dataset) : dataset;
 
-  for (let i = 0; i < lines.length; i++) {
+  const resolvedName =
+    verifierName ??
+    (verifier.constructor ? verifier.constructor.name : undefined) ??
+    "Verifier";
+
+  const predictions: BenchmarkPrediction[] = [];
+  const latencies: number[] = [];
+  const startRun = performance.now();
+
+  for (const item of items) {
+    const startTime = performance.now();
     try {
-      const parsed = JSON.parse(lines[i]);
-      if (!parsed.id || !parsed.claim || !Array.isArray(parsed.evidence) || !parsed.goldVerdict) {
-        throw new Error(`Invalid benchmark item schema at line ${i + 1}`);
-      }
-      items.push({
-        id: String(parsed.id),
-        claim: String(parsed.claim),
-        evidence: parsed.evidence,
-        goldVerdict: parsed.goldVerdict,
-        category: parsed.category || "uncategorized",
-        rationale: parsed.rationale,
-        metamorphic: parsed.metamorphic,
-        metadata: parsed.metadata,
-      });
-    } catch (err) {
-      throw new Error(`Failed to parse JSONL line ${i + 1} in ${filePath}: ${(err as Error).message}`);
-    }
-  }
-
-  return items;
-}
-
-export interface RunBenchmarkOptions {
-  verifier: Verifier;
-  dataset: BenchmarkItem[] | string;
-  verifierName?: string;
-  outputPath?: string;
-  thresholds?: RegressionThresholds;
-}
-
-export async function runBenchmark(options: RunBenchmarkOptions): Promise<BenchmarkReport> {
-  const { verifier, verifierName = "verifier", outputPath, thresholds } = options;
-
-  const dataset = typeof options.dataset === "string"
-    ? await loadJsonlDataset(options.dataset)
-    : options.dataset;
-
-  const predictions: CasePrediction[] = [];
-  const predictionMap = new Map<string, CasePrediction>();
-
-  for (const item of dataset) {
-    try {
-      const result = await verifier.verify({
+      const verification = await verifier.verify({
         claim: item.claim,
         evidence: item.evidence,
       });
+      const endTime = performance.now();
+      const latencyMs = endTime - startTime;
+      latencies.push(latencyMs);
 
-      const prediction: CasePrediction = {
-        id: item.id,
-        claim: item.claim,
-        goldVerdict: item.goldVerdict,
-        predictedVerdict: result.verdict,
-        confidence: result.confidence,
-        probabilities: result.probabilities,
-        category: item.category,
-        correct: result.verdict === item.goldVerdict,
-        raw: result.raw,
-      };
+      predictions.push({
+        item,
+        verification,
+        latencyMs,
+      });
+    } catch (err: unknown) {
+      const endTime = performance.now();
+      const latencyMs = endTime - startTime;
+      latencies.push(latencyMs);
 
-      predictions.push(prediction);
-      predictionMap.set(item.id, prediction);
-    } catch (err) {
-      const errorMsg = (err as Error).message;
-      const prediction: CasePrediction = {
-        id: item.id,
-        claim: item.claim,
-        goldVerdict: item.goldVerdict,
-        predictedVerdict: "insufficient",
-        confidence: 0,
-        probabilities: { supported: 0, contradicted: 0, insufficient: 1 },
-        category: item.category,
-        correct: false,
-        error: errorMsg,
-      };
-
-      predictions.push(prediction);
-      predictionMap.set(item.id, prediction);
+      predictions.push({
+        item,
+        latencyMs,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
-  const overallConfusion = buildConfusionMatrix(predictions);
-  const { accuracy, macroF1 } = calculateMacroMetrics(predictions);
-  const categories = buildCategoryMetrics(predictions);
-
-  const metamorphicResults = evaluateMetamorphicChecks(dataset, predictionMap);
-  const metamorphicPassedCount = metamorphicResults.filter((r) => r.passed).length;
-  const metamorphicPassRate = metamorphicResults.length > 0
-    ? metamorphicPassedCount / metamorphicResults.length
-    : 1.0;
-
-  const thresholdFailures: string[] = [];
-
-  if (thresholds) {
-    if (thresholds.minOverallAccuracy !== undefined && accuracy < thresholds.minOverallAccuracy) {
-      thresholdFailures.push(
-        `Overall accuracy ${accuracy.toFixed(3)} below threshold ${thresholds.minOverallAccuracy.toFixed(3)}`
-      );
-    }
-    if (thresholds.minMetamorphicPassRate !== undefined && metamorphicPassRate < thresholds.minMetamorphicPassRate) {
-      thresholdFailures.push(
-        `Metamorphic pass rate ${metamorphicPassRate.toFixed(3)} below threshold ${thresholds.minMetamorphicPassRate.toFixed(3)}`
-      );
-    }
-    if (thresholds.minCategoryAccuracy) {
-      for (const [cat, minAcc] of Object.entries(thresholds.minCategoryAccuracy)) {
-        const catMetrics = categories[cat];
-        const catAcc = catMetrics ? catMetrics.accuracy : 0;
-        if (catAcc < minAcc) {
-          thresholdFailures.push(
-            `Category '${cat}' accuracy ${catAcc.toFixed(3)} below threshold ${minAcc.toFixed(3)}`
-          );
-        }
-      }
-    }
+  const confusionMatrix = computeConfusionMatrix(predictions);
+  const { perClassMetrics, macroMetrics, accuracy } =
+    computeClassMetrics(confusionMatrix);
+  const latency = computeLatencyMetrics(latencies);
+  const success = predictions.filter(p => p.verification && !p.error);
+  const failures = predictions.filter(p => p.error || !p.verification);
+  const calibration = computeCalibrationMetrics(predictions);
+  const errorBreakdown: Record<string, number> = {};
+  for (const p of failures) {
+    const reason = p.error?.split(":")[0] ?? "MissingVerification";
+    errorBreakdown[reason] = (errorBreakdown[reason] ?? 0) + 1;
   }
+  const cached = success.filter(p => p.verification?.cacheHit === true).map(p => p.latencyMs);
+  const uncached = success.filter(p => p.verification?.cacheHit !== true).map(p => p.latencyMs);
+  const seconds = (performance.now() - startRun) / 1000;
+  const tokenCost = aggregateTokenCost(predictions);
 
-  const report: BenchmarkReport = {
+  const result: BenchmarkResult = {
     timestamp: new Date().toISOString(),
-    verifierName,
-    totalCases: dataset.length,
+    verifierName: resolvedName,
+    datasetSize: items.length,
+    scored: success.length,
+    failed: failures.length,
+    failureRate: items.length ? failures.length / items.length : 0,
+    throughput: seconds > 0 ? items.length / seconds : 0,
+    errorBreakdown,
+    ...(calibration ? { calibration } : {}),
+    ...(cached.length ? { cachedLatency: computeLatencyMetrics(cached) } : {}),
+    ...(uncached.length ? { uncachedLatency: computeLatencyMetrics(uncached) } : {}),
     accuracy,
-    macroF1,
-    overallConfusion,
-    categories,
-    metamorphicResults,
-    metamorphicPassRate,
+    macroMetrics,
+    perClassMetrics,
+    confusionMatrix,
+    latency,
+    ...(tokenCost ? { tokenCost } : {}),
     predictions,
-    thresholdsPassed: thresholdFailures.length === 0,
-    thresholdFailures,
   };
 
   if (outputPath) {
-    await mkdir(dirname(outputPath), { recursive: true });
-    await writeFile(outputPath, JSON.stringify(report, null, 2), "utf-8");
+    const dir = path.dirname(outputPath);
+    if (dir && dir !== ".") {
+      await fs.mkdir(dir, { recursive: true });
+    }
+    await fs.writeFile(outputPath, JSON.stringify(result, null, 2), "utf-8");
   }
 
-  return report;
+  return result;
+}
+
+export function formatConsoleSummary(result: BenchmarkResult): string {
+  const lines: string[] = [];
+  lines.push("=================================================");
+  lines.push(` Factuality Benchmark Summary: ${result.verifierName}`);
+  lines.push("=================================================");
+  lines.push(`Timestamp:    ${result.timestamp}`);
+  lines.push(`Dataset Size: ${result.datasetSize} samples`);
+  lines.push(`Scored: ${result.scored} | Provider failures: ${result.failed} | Failure rate: ${((result.failureRate ?? 0)*100).toFixed(1)}%`);
+  lines.push(result.scored > 0 ? `Accuracy:     ${(result.accuracy * 100).toFixed(2)}%` : "Accuracy:     N/A (no valid model predictions)");
+  lines.push(
+    `Macro Avg:    Precision: ${(result.macroMetrics.precision * 100).toFixed(2)}% | Recall: ${(result.macroMetrics.recall * 100).toFixed(2)}% | F1: ${(result.macroMetrics.f1 * 100).toFixed(2)}%`,
+  );
+  lines.push("");
+  if (result.calibration) lines.push(`Calibration: ECE ${result.calibration.ece.toFixed(4)} | Brier ${result.calibration.brierScore.toFixed(4)}`);
+  lines.push("--- Per-Class Metrics ---");
+  lines.push(
+    `${"Class".padEnd(14)} | ${"Precision".padStart(9)} | ${"Recall".padStart(9)} | ${"F1".padStart(9)} | ${"Support".padStart(7)}`,
+  );
+  lines.push("-".repeat(58));
+
+  for (const verdict of VERDICTS) {
+    const m = result.perClassMetrics[verdict];
+    lines.push(
+      `${verdict.padEnd(14)} | ${(m.precision * 100).toFixed(2).padStart(8)}% | ${(m.recall * 100).toFixed(2).padStart(8)}% | ${(m.f1 * 100).toFixed(2).padStart(8)}% | ${String(m.support).padStart(7)}`,
+    );
+  }
+
+  lines.push("");
+  lines.push("--- Confusion Matrix (Gold \\ Predicted) ---");
+  lines.push(
+    `${"Gold \\ Pred".padEnd(14)} | ${"Supported".padStart(11)} | ${"Contradicted".padStart(12)} | ${"Insufficient".padStart(12)}`,
+  );
+  lines.push("-".repeat(58));
+
+  for (const gold of VERDICTS) {
+    const row = result.confusionMatrix[gold];
+    lines.push(
+      `${gold.padEnd(14)} | ${String(row.supported).padStart(11)} | ${String(row.contradicted).padStart(12)} | ${String(row.insufficient).padStart(12)}`,
+    );
+  }
+
+  lines.push("");
+  lines.push("--- Latency ---");
+  lines.push(
+    `Total: ${result.latency.totalMs.toFixed(2)} ms | Mean: ${result.latency.meanMs.toFixed(2)} ms | Median: ${result.latency.medianMs.toFixed(2)} ms | Min: ${result.latency.minMs.toFixed(2)} ms | Max: ${result.latency.maxMs.toFixed(2)} ms | P95: ${result.latency.p95Ms.toFixed(2)} ms`,
+  );
+
+  if (result.tokenCost) {
+    lines.push("");
+    lines.push("--- Token & Cost Metadata ---");
+    if (result.tokenCost.promptTokens !== undefined) {
+      lines.push(`Prompt Tokens:     ${result.tokenCost.promptTokens}`);
+    }
+    if (result.tokenCost.completionTokens !== undefined) {
+      lines.push(`Completion Tokens: ${result.tokenCost.completionTokens}`);
+    }
+    if (result.tokenCost.totalTokens !== undefined) {
+      lines.push(`Total Tokens:      ${result.tokenCost.totalTokens}`);
+    }
+    if (result.tokenCost.totalCost !== undefined) {
+      lines.push(`Total Cost:        $${result.tokenCost.totalCost.toFixed(4)}`);
+    }
+  }
+
+  lines.push("=================================================");
+  return lines.join("\n");
 }

@@ -1,85 +1,87 @@
-import type { Evidence, VerificationProbabilities, VerificationVerdict } from "../types.js";
-
-export type BenchmarkCategory =
-  | "prompt_injection"
-  | "conflicting_stale"
-  | "semantic_robustness"
-  | "distractor_passages"
-  | "insufficient_vs_contradicted"
-  | string;
-
-export interface MetamorphicRelation {
-  type: "distractor_insertion" | "date_swap" | "number_swap" | "reorder_evidence" | string;
-  baseId: string;
-  expectedChange: "invariant" | "verdict_flip" | string;
-}
+import type { Evidence, Verification, VerificationVerdict, Verifier } from "../types.js";
 
 export interface BenchmarkItem {
   id: string;
   claim: string;
   evidence: Evidence[];
   goldVerdict: VerificationVerdict;
-  category: BenchmarkCategory;
-  rationale?: string;
-  metamorphic?: MetamorphicRelation;
   metadata?: Record<string, unknown>;
 }
 
-export interface CasePrediction {
-  id: string;
-  claim: string;
-  goldVerdict: VerificationVerdict;
-  predictedVerdict: VerificationVerdict;
-  confidence: number;
-  probabilities: VerificationProbabilities;
-  category: BenchmarkCategory;
-  correct: boolean;
-  error?: string;
-  raw?: unknown;
-}
-
-export interface ConfusionMatrix {
-  matrix: Record<VerificationVerdict, Record<VerificationVerdict, number>>;
-  total: number;
-}
-
-export interface CategoryMetrics {
-  category: BenchmarkCategory;
-  count: number;
-  correct: number;
-  accuracy: number;
+export interface ClassMetrics {
+  precision: number;
+  recall: number;
   f1: number;
-  confusion: ConfusionMatrix;
+  support: number;
 }
 
-export interface MetamorphicCheckResult {
-  id: string;
-  baseId: string;
-  relationType: string;
-  expectedChange: string;
-  basePredictedVerdict: VerificationVerdict;
-  variantPredictedVerdict: VerificationVerdict;
-  passed: boolean;
-  failureReason?: string;
+export type ConfusionMatrix = Record<
+  VerificationVerdict,
+  Record<VerificationVerdict, number>
+>;
+
+export interface LatencyMetrics {
+  totalMs: number;
+  meanMs: number;
+  medianMs: number;
+  minMs: number;
+  maxMs: number;
+  p95Ms: number;
 }
 
-export interface BenchmarkReport {
+export interface CalibrationMetrics {
+  ece: number;
+  brierScore: number;
+}
+
+export interface TokenCostMetrics {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  totalCost?: number;
+}
+
+export interface BenchmarkPrediction {
+  item: BenchmarkItem;
+  verification?: Verification;
+  latencyMs: number;
+  tokens?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  };
+  cost?: number;
+  error?: string;
+}
+
+export interface BenchmarkResult {
   timestamp: string;
   verifierName: string;
-  totalCases: number;
+  datasetSize: number;
+  scored: number;
+  failed: number;
+  failureRate?: number;
+  throughput?: number;
+  errorBreakdown?: Record<string, number>;
+  calibration?: CalibrationMetrics;
+  cachedLatency?: LatencyMetrics;
+  uncachedLatency?: LatencyMetrics;
   accuracy: number;
-  macroF1: number;
-  overallConfusion: ConfusionMatrix;
-  categories: Record<BenchmarkCategory, CategoryMetrics>;
-  metamorphicResults: MetamorphicCheckResult[];
-  metamorphicPassRate: number;
-  predictions: CasePrediction[];
-  thresholdsPassed?: boolean;
-  thresholdFailures?: string[];
+  macroMetrics: {
+    precision: number;
+    recall: number;
+    f1: number;
+  };
+  perClassMetrics: Record<VerificationVerdict, ClassMetrics>;
+  confusionMatrix: ConfusionMatrix;
+  latency: LatencyMetrics;
+  tokenCost?: TokenCostMetrics;
+  predictions: BenchmarkPrediction[];
 }
 
-export interface RegressionThresholds {
-  minOverallAccuracy?: number;
-  minCategoryAccuracy?: Record<string, number>;
-  minMetamorphicPassRate?: number;
+export interface BenchmarkOptions {
+  verifier: Verifier;
+  dataset: BenchmarkItem[] | string;
+  verifierName?: string;
+  outputPath?: string;
 }

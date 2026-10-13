@@ -12,13 +12,16 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "fixtures"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "benchmark": "node scripts/run_benchmark.mjs"
+    "test:smoke": "node -e 'import(\"./dist/index.js\").then((m) => { const required = [\"JevVerifier\", \"verifyAnswer\", \"splitClaims\", \"aggregateVerdict\", \"aggregateProbabilities\"]; for (const name of required) { if (!(name in m)) throw new Error(\"Missing export: \" + name); } new m.JevVerifier(); console.log(\"Smoke test passed\"); }).catch((err) => { console.error(err); process.exit(1); })'",
+    "benchmark": "npm run build && node dist/benchmark/cli.js",
+    "benchmark:adversarial": "npm run build && node scripts/run_adversarial.mjs"
   },
   "keywords": [
     "jev",
@@ -26,7 +29,8 @@
     "hallucination",
     "factuality",
     "rag",
-    "verification"
+    "verification",
+    "benchmark"
   ],
   "license": "MIT",
   "engines": {
@@ -36,7 +40,7 @@
     "@typesafe-ai/sdk": "^0.6.0"
   },
   "devDependencies": {
-    "@types/node": "^26.6.5",
+    "@types/node": "^26.6.2",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
   }

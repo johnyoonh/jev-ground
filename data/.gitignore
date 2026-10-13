@@ -1,2 +1,2 @@
-*.raw.json
-*.cache
+*
+!.gitignore
