@@ -1,5 +1,4 @@
 import type { BatchVerifier, Verification, Verifier, VerifyClaimInput } from "../types.js";
-import { isBatchVerifier } from "../types.js";
 
 export interface RetryOptions {
   maxAttempts?: number;
@@ -34,7 +33,9 @@ export function isTransientError(error: unknown): boolean {
   const status = statusOf(error);
   if (status !== undefined) return RETRYABLE_STATUS.has(status);
   const code = codeOf(error);
-  return code !== undefined && RETRYABLE_CODE.has(code);
+  if (code !== undefined && RETRYABLE_CODE.has(code)) return true;
+  const name = asRecord(error)?.name;
+  return name === "APIConnectionError" || name === "APITimeoutError";
 }
 function retryAfterMs(error: unknown, nowMs: number): number | undefined {
   const record = asRecord(error);
@@ -76,39 +77,22 @@ export class RetryingVerifier implements BatchVerifier {
     }
   }
   async verify(input: VerifyClaimInput): Promise<Verification> {
-    this.stats.calls++;
-    for (let attempt = 1; attempt <= this.options.maxAttempts; attempt++) {
-      this.stats.attempts++;
-      try {
-        return await this.delegate.verify(input);
-      } catch (error) {
-        if (attempt === this.options.maxAttempts || !this.options.shouldRetry(error)) throw error;
-        const exponential = Math.min(this.options.maxDelayMs,
-          this.options.baseDelayMs * 2 ** (attempt - 1));
-        const jitter = Math.max(0, Math.min(1, this.options.random()));
-        const wait = Math.min(this.options.maxDelayMs,
-          Math.max(exponential * (0.5 + 0.5 * jitter), retryAfterMs(error, Date.now()) ?? 0));
-        this.stats.retries++;
-        this.options.onRetry?.(error, attempt, wait);
-        await this.options.sleep(wait);
-      }
-    }
-    throw new Error("Unreachable retry state");
+    return this.withRetries(() => this.delegate.verify(input));
   }
-
   async verifyMany(inputs: VerifyClaimInput[]): Promise<Verification[]> {
     if (inputs.length === 0) return [];
+    const batch = (this.delegate as Partial<BatchVerifier>).verifyMany;
+    if (typeof batch !== "function") {
+      return Promise.all(inputs.map(input => this.verify(input)));
+    }
+    return this.withRetries(() => batch.call(this.delegate, inputs));
+  }
+  private async withRetries<T>(operation: () => Promise<T>): Promise<T> {
     this.stats.calls++;
     for (let attempt = 1; attempt <= this.options.maxAttempts; attempt++) {
       this.stats.attempts++;
       try {
-        if (isBatchVerifier(this.delegate)) {
-          return await this.delegate.verifyMany(inputs);
-        } else {
-          return await Promise.all(
-            inputs.map((input) => this.delegate.verify(input)),
-          );
-        }
+        return await operation();
       } catch (error) {
         if (attempt === this.options.maxAttempts || !this.options.shouldRetry(error)) throw error;
         const exponential = Math.min(this.options.maxDelayMs,
