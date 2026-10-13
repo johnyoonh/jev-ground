@@ -167,6 +167,45 @@ answer
 
 This keeps Jev as a provider rather than making the repository a wrapper around one model.
 
+## Validated and batched Jev verification
+
+Jev judgments are strict: malformed choices, missing probabilities, non-finite values,
+or conflicting labels are provider errors, **never** converted into factuality verdicts.
+The public `BatchVerifier.verifyMany()` capability keeps each claim an independent
+typed question but shares evidence across one Jev request. Question and state limits
+chunk large batches without silently truncating evidence.
+
+The SDK's implicit retries are disabled for Jev requests. Configure
+`RetryingVerifier` explicitly for bounded retries; batching is preserved through
+`RetryingVerifier` and `CachedVerifier`.
+
+For cached runs, use `jev.cacheNamespace`, which incorporates the configured model
+and a SHA-256 rubric fingerprint. **Use an explicitly pinned Jev model for
+persistent caches and reproducible benchmarking**, since aliases such as
+`jev-latest` can change without notice. The response records the resolved model.
+
+```ts
+import { JevVerifier, RetryingVerifier, CachedVerifier, MemoryVerificationCache } from "jev-ground";
+
+const jev = new JevVerifier({ model: "jev-1.13.0" });
+const verifier = new CachedVerifier(new RetryingVerifier(jev), {
+  namespace: jev.cacheNamespace,
+  cache: new MemoryVerificationCache(),
+});
+```
+
+The default `npm run benchmark` uses an offline mock. Paid CLI calls now
+require `--verifier jev --live`. No benchmark accuracy is implied by mock runs.
+
+## Resumable model evaluation
+
+Use node scripts/run_evaluation.mjs with --live for billed evaluations.
+It runs an uncached model preflight, bounds concurrency, and checkpoints
+successful results. Pass --resume on the same data and model/rubric fingerprint
+after interruption. Keep checkpoint data private: it contains source evidence.
+
+See [evaluation datasets](docs/evaluation-datasets.md) for setup and licenses.
+
 ## Development
 
 ```bash
