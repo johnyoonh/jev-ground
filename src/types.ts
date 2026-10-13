@@ -22,6 +22,8 @@ export interface Verification {
   confidence: number;
   evidenceIds: string[];
   provider?: string;
+  /** True when served from cache; false when evaluated live. */
+  cacheHit?: boolean;
   raw?: unknown;
 }
 
