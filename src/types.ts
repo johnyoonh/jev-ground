@@ -25,6 +25,7 @@ export interface Verification {
   /** True when served from cache; false when evaluated live. */
   cacheHit?: boolean;
   raw?: unknown;
+  metadata?: Record<string, unknown>;
 }
 
 export interface VerifyClaimInput {
