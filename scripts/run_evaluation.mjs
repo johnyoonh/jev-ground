@@ -63,7 +63,8 @@ async function main() {
   if (items.length === 0) throw new Error("Dataset is empty.");
   const subset = items.slice(0, opts.maxExamples);
   console.log("Running " + subset.length + "/" + items.length + " examples. No provider-side billing cap is configured.");
-  const retried = new RetryingVerifier(new JevVerifier({ model: opts.model }), {
+  const jev = new JevVerifier({ model: opts.model });
+  const retried = new RetryingVerifier(jev, {
     maxAttempts: opts.maxAttempts, baseDelayMs: 500, maxDelayMs: 8000,
     onRetry: (_error, attempt, delay) =>
       console.warn("Transient error; retry " + attempt + " in " + Math.round(delay) + " ms"),
@@ -71,7 +72,7 @@ async function main() {
   const verifier = opts.noCache
     ? retried
     : new CachedVerifier(retried, {
-        namespace: "jev-ground:factuality-schema-v1:" + opts.model,
+        namespace: jev.cacheNamespace,
         cache: opts.cacheDir
           ? new FileVerificationCache(opts.cacheDir)
           : new MemoryVerificationCache(),
