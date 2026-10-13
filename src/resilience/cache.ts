@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import path from "node:path";
-import type { Verification, Verifier, VerifyClaimInput } from "../types.js";
+import type { BatchVerifier, Verification, Verifier, VerifyClaimInput } from "../types.js";
 
 export interface VerificationCacheEntry {
   storedAt: number;
@@ -80,7 +80,7 @@ export interface CachedVerifierOptions {
   ttlMs?: number;
   now?: () => number;
 }
-export class CachedVerifier implements Verifier {
+export class CachedVerifier implements BatchVerifier {
   readonly stats = { hits: 0, misses: 0, shared: 0, cacheErrors: 0 };
   private readonly pending = new Map<string, Promise<Verification>>();
   private readonly now: () => number;
@@ -101,6 +101,68 @@ export class CachedVerifier implements Verifier {
     const work = this.verifyOnce(key, input);
     this.pending.set(key, work);
     try { return await work; } finally { this.pending.delete(key); }
+  }
+  /**
+   * Cache hits are reused; only cache misses are batched. Identical concurrent
+   * single-claim lookups still coalesce through the same pending map.
+   */
+  async verifyMany(inputs: VerifyClaimInput[]): Promise<Verification[]> {
+    if (inputs.length === 0) return [];
+    const delegateBatch = (this.delegate as Partial<BatchVerifier>).verifyMany;
+    if (typeof delegateBatch !== "function" || inputs.length === 1) {
+      return Promise.all(inputs.map(input => this.verify(input)));
+    }
+    const keys = inputs.map(input => verificationCacheKey(this.options.namespace, input));
+    if (new Set(keys).size !== keys.length || keys.some(key => this.pending.has(key))) {
+      return Promise.all(inputs.map(input => this.verify(input)));
+    }
+    const outputs: Array<Verification | Promise<Verification>> = new Array(inputs.length);
+    const misses: Array<{ key: string; input: VerifyClaimInput; index: number }> = [];
+    for (let index = 0; index < inputs.length; index++) {
+      const key = keys[index];
+      let record: VerificationCacheEntry | undefined;
+      try { record = await this.options.cache.get(key); }
+      catch { this.stats.cacheErrors++; }
+      if (record && this.now() - record.storedAt <= this.ttlMs) {
+        this.stats.hits++;
+        outputs[index] = { ...record.value, cacheHit: true };
+      } else if (this.pending.has(key)) {
+        this.stats.shared++;
+        outputs[index] = this.pending.get(key)!;
+      } else {
+        this.stats.misses++;
+        misses.push({ key, input: inputs[index], index });
+      }
+    }
+    if (misses.length > 0) {
+      const batch = (async () => {
+        const verified = await delegateBatch.call(this.delegate, misses.map(item => item.input));
+        if (verified.length !== misses.length ||
+            verified.some((value, i) => !value || value.claim !== misses[i].input.claim)) {
+          throw new Error("Batched delegate returned mismatched claim results");
+        }
+        await Promise.all(verified.map(async (value, index) => {
+          try {
+            await this.options.cache.set(misses[index].key, {
+              storedAt: this.now(), value,
+            });
+          } catch { this.stats.cacheErrors++; }
+        }));
+        return verified.map(value => ({ ...value, cacheHit: false }));
+      })();
+      for (let i = 0; i < misses.length; i++) {
+        const promise = batch.then(values => values[i]);
+        const item = misses[i];
+        this.pending.set(item.key, promise);
+        outputs[item.index] = promise;
+      }
+      try {
+        return await Promise.all(outputs);
+      } finally {
+        for (const item of misses) this.pending.delete(item.key);
+      }
+    }
+    return Promise.all(outputs);
   }
   private async verifyOnce(key: string, input: VerifyClaimInput): Promise<Verification> {
     let record: VerificationCacheEntry | undefined;
