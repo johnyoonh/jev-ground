@@ -53,6 +53,8 @@ export interface BenchmarkResult {
   timestamp: string;
   verifierName: string;
   datasetSize: number;
+  scored: number;
+  failed: number;
   accuracy: number;
   macroMetrics: {
     precision: number;

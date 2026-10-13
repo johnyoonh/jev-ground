@@ -245,3 +245,29 @@ describe("Benchmark Harness", () => {
     });
   });
 });
+
+describe("Provider error accounting", () => {
+  it("never counts failed calls as an insufficient factuality prediction", async () => {
+    const cases: BenchmarkItem[] = [
+      { id: "pass", claim: "pass", evidence: [], goldVerdict: "supported" },
+      { id: "outage", claim: "outage", evidence: [], goldVerdict: "insufficient" },
+    ];
+    const verifier: Verifier = {
+      async verify({claim}) {
+        if (claim === "outage") throw new Error("HTTP 429");
+        return {
+          claim, verdict: "supported" as const, confidence: 0.9, evidenceIds: [],
+          probabilities: { supported: 0.9, contradicted: 0.05, insufficient: 0.05 },
+        };
+      },
+    };
+    const report = await runBenchmark({ dataset: cases, verifier });
+    expect(report.datasetSize).toBe(2);
+    expect(report.scored).toBe(1);
+    expect(report.failed).toBe(1);
+    expect(report.accuracy).toBe(1);
+    expect(report.confusionMatrix.insufficient.insufficient).toBe(0);
+    expect(report.confusionMatrix.supported.supported).toBe(1);
+    expect(formatConsoleSummary(report)).toContain("Provider failures: 1");
+  });
+});

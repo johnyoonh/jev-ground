@@ -28,7 +28,8 @@ export function computeConfusionMatrix(
 
   for (const pred of predictions) {
     const gold = pred.item.goldVerdict;
-    const predicted = pred.verification?.verdict ?? "insufficient";
+    if (pred.error || !pred.verification) continue; // Provider errors are not a factuality class.
+    const predicted = pred.verification.verdict;
     matrix[gold][predicted] += 1;
   }
 

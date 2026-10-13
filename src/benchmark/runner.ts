@@ -72,6 +72,8 @@ export async function runBenchmark({
     timestamp: new Date().toISOString(),
     verifierName: resolvedName,
     datasetSize: items.length,
+    scored: predictions.filter((p) => p.verification && !p.error).length,
+    failed: predictions.filter((p) => !!p.error || !p.verification).length,
     accuracy,
     macroMetrics,
     perClassMetrics,
@@ -99,7 +101,8 @@ export function formatConsoleSummary(result: BenchmarkResult): string {
   lines.push("=================================================");
   lines.push(`Timestamp:    ${result.timestamp}`);
   lines.push(`Dataset Size: ${result.datasetSize} samples`);
-  lines.push(`Accuracy:     ${(result.accuracy * 100).toFixed(2)}%`);
+  lines.push(`Scored: ${result.scored} | Provider failures: ${result.failed}`);
+  lines.push(result.scored > 0 ? `Accuracy:     ${(result.accuracy * 100).toFixed(2)}%` : "Accuracy:     N/A (no valid model predictions)");
   lines.push(
     `Macro Avg:    Precision: ${(result.macroMetrics.precision * 100).toFixed(2)}% | Recall: ${(result.macroMetrics.recall * 100).toFixed(2)}% | F1: ${(result.macroMetrics.f1 * 100).toFixed(2)}%`,
   );

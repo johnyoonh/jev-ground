@@ -1,5 +1,7 @@
 # jev-ground
 
+[![CI](https://github.com/johnyoonh/jev-ground/actions/workflows/ci.yml/badge.svg)](https://github.com/typesafe-ai/jev-ground/actions/workflows/ci.yml)
+
 Evidence-grounded factuality verification for LLM and agent outputs.
 
 `jev-ground` turns claims plus evidence into typed verification results:
@@ -19,7 +21,6 @@ Early v0.1 scaffold. The first implementation focuses on:
 - a TypeSafe/Jev provider
 - answer verification with simple deterministic claim splitting
 - answer-level aggregation
-- benchmark harness and evaluation layer for verifiers
 - unit tests around provider-independent behavior
 
 ## Install
@@ -150,6 +151,7 @@ console.log(`Latency (p95): ${result.latency.p95Ms} ms`);
 - **Latency**: `totalMs`, `meanMs`, `medianMs`, `minMs`, `maxMs`, `p95Ms`.
 - **Token & Cost Metadata**: Aggregate prompt tokens, completion tokens, total tokens, and total cost (when provided in `Verification.raw`).
 
+
 ## Design
 
 The project deliberately separates orchestration from judgment:
@@ -171,7 +173,7 @@ This keeps Jev as a provider rather than making the repository a wrapper around 
 npm test
 npm run typecheck
 npm run build
-npm run benchmark
+npm run benchmark # offline mock data by default
 ```
 
 ## License
