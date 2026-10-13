@@ -43,7 +43,7 @@ node scripts/run_evaluation.mjs \
 
 The manifest alongside the JSONL records source/output SHA-256, license,
 seed, mapping/skipped counts, and whether the sample was class balanced.
-The imported dataset stays under ignored \`data/\`; none of the source data
+The imported dataset stays under ignored `data/`; none of the source data
 is redistributed as part of this repository. Review the upstream dataset
 license before sharing generated artifacts.
 
@@ -52,7 +52,7 @@ license before sharing generated artifacts.
 Source: [Stanford ContractNLI](https://stanfordnlp.github.io/contract-nli/),
 license **CC BY 4.0**, 607 contracts with 17 recurring hypotheses.
 **Download from the official site after accepting its terms.** Locate its
-labeled JSON file with top-level \`documents\` and \`labels\` and run:
+labeled JSON file with top-level `documents` and `labels` and run:
 
 ~~~bash
 python3 scripts/prepare_eval.py contract-nli \
@@ -70,7 +70,7 @@ The converter maps Entailment -> supported, Contradiction -> contradicted,
 NotMentioned -> insufficient. It uses **the entire contract as evidence**,
 rather than selecting the human-annotated gold evidence spans; those span
 indices stay in the result metadata for later attribution evaluation.
-\`--max-evidence-chars\` **drops** overlong contracts instead of truncating
+`--max-evidence-chars` **drops** overlong contracts instead of truncating
 premises and silently corrupting gold labels. This selection changes the
 population and must be reported. If your model supports full contracts,
 omit that flag. Always test the model's context limits.
@@ -79,8 +79,8 @@ omit that flag. Always test the model's context limits.
 
 | Source | Labels/evidence | Follow-up |
 | --- | --- | --- |
-| [RAGBench](https://huggingface.co/datasets/galileo-ai/ragbench) | ~100k RAG examples; binary \`adherence_score\`, sentence-level support; CC BY 4.0 | Add a **binary response-level** or sentence-level task. Do not turn false adherence into 'contradicted'. |
-| [HaluBench](https://huggingface.co/datasets/PatronusAI/HaluBench) | ~14,900 passage/question/answer samples; PASS/FAIL; CC BY-NC 2.0 | Implement binary faithful/unfaithful metrics and compare by \`source_ds\`. |
+| [RAGBench](https://huggingface.co/datasets/galileo-ai/ragbench) | ~100k RAG examples; binary `adherence_score`, sentence-level support; CC BY 4.0 | Add a **binary response-level** or sentence-level task. Do not turn false adherence into 'contradicted'. |
+| [HaluBench](https://huggingface.co/datasets/PatronusAI/HaluBench) | ~14,900 passage/question/answer samples; PASS/FAIL; CC BY-NC 2.0 | Implement binary faithful/unfaithful metrics and compare by `source_ds`. |
 | [RAGTruth](https://github.com/ParticleMedia/RAGTruth) | ~18,000 RAG responses with hallucinated text spans | Span-aware evaluation of extracted atomic claims. |
 | [FEVER](https://fever.ai/dataset/fever.html) | 185k+ SUPPORTS/REFUTES/NOT ENOUGH INFO claims | Join the separate Wikipedia sentence corpus to the claim's evidence references. The claims file alone does **not** contain passage text. |
 | [AVeriTeC](https://github.com/MichSchli/AVeriTeC) | 4 fact-check verdicts | Three supported labels imported; conflicting label excluded. |
@@ -91,19 +91,19 @@ faithfulness benchmark. Scores across those tasks are not interchangeable.
 
 ## Caching and retry semantics
 
-\`CachedVerifier\` wraps any \`Verifier\` and keys on SHA-256 of namespace,
+`CachedVerifier` wraps any `Verifier` and keys on SHA-256 of namespace,
 claim, evidence IDs, evidence texts and evidence metadata. **Specify a
 namespace that includes exact model name/version, verification rubric/prompt,
 and provider behavior version.** Changing evidence or namespace invalidates
 prior judgments. The file cache is opt-in; no credentials are written. Raw
 provider responses are excluded from disk files, but **claim text, verdict,
-and evidence IDs remain on disk**. Use the in-memory cache or \`--no-cache\`
-for sensitive content. The \`.cache/\` directory is ignored.
+and evidence IDs remain on disk**. Use the in-memory cache or `--no-cache`
+for sensitive content. The `.cache/` directory is ignored.
 
-\`RetryingVerifier\` retries only common transient HTTP statuses
+`RetryingVerifier` retries only common transient HTTP statuses
 (408, 409, 425, 429, 5xx including 529) and transient transport errors.
 Authentication failures (401/403), validation errors, and other permanent
-failures are not retried. The wrapper honors \`Retry-After\` within a maximum
+failures are not retried. The wrapper honors `Retry-After` within a maximum
 backoff; retry count and delay are bounded. Failures are never cached.
 Place the cache OUTSIDE the retry wrapper: cached -> retried -> provider.
 
@@ -126,7 +126,7 @@ const result = await verifier.verify({ claim, evidence });
 ~~~
 
 The live evaluator script defaults to an in-memory cache; provide
-\`--cache-dir .cache/jev-ground\` to cache across runs. It requires \`--live\`.
+`--cache-dir .cache/jev-ground` to cache across runs. It requires `--live`.
 It caps *examples* by default (20), **not total retries, input tokens, or
 actual billing**. Set separate account/API-key billing limits before broad
 runs. Verify TypeSafe model compatibility and API credentials yourself.
