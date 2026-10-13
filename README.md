@@ -214,6 +214,13 @@ For a 32-case synthetic adversarial/metamorphic suite, run `npm run benchmark:ad
 
 For a non-billable request-count test (not Jev latency), run `npm run benchmark:batching` and see [the batching guide](docs/batching-benchmark.md).
 
+## Live provider attempt limits
+
+Use `--max-provider-attempts` for a hard admission limit across retries and
+batch chunks. A transient-error circuit breaker prevents repeated requests
+during outages. Token/USD forecasts are estimates, not guaranteed spending
+limits. See [provider budgets](docs/provider-budgets.md).
+
 ## Development
 
 ```bash
