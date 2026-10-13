@@ -22,6 +22,11 @@ export interface Verification {
   confidence: number;
   evidenceIds: string[];
   provider?: string;
+  /** Resolved provider model, not necessarily the alias requested. */
+  model?: string;
+  rubricFingerprint?: string;
+  /** True when served from cache; false when evaluated live. */
+  cacheHit?: boolean;
   raw?: unknown;
 }
 
@@ -32,6 +37,11 @@ export interface VerifyClaimInput {
 
 export interface Verifier {
   verify(input: VerifyClaimInput): Promise<Verification>;
+}
+
+/** Optional capability: coalesce independent atomic judgments without merging them. */
+export interface BatchVerifier extends Verifier {
+  verifyMany(inputs: VerifyClaimInput[]): Promise<Verification[]>;
 }
 
 export interface ClaimVerification extends Verification {

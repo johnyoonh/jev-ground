@@ -1,9 +1,7 @@
 import { aggregateProbabilities, aggregateVerdict } from "./aggregate.js";
 import { splitClaims, type ClaimExtractor } from "./claims.js";
 import type {
-  AnswerVerification,
-  Evidence,
-  Verifier,
+  AnswerVerification, BatchVerifier, Evidence, Verification, Verifier,
 } from "./types.js";
 
 export interface VerifyAnswerInput {
@@ -12,34 +10,38 @@ export interface VerifyAnswerInput {
   verifier: Verifier;
   extractClaims?: ClaimExtractor;
 }
+function supportsBatch(verifier: Verifier): verifier is BatchVerifier {
+  return typeof (verifier as Partial<BatchVerifier>).verifyMany === "function";
+}
 
 export async function verifyAnswer({
-  answer,
-  evidence,
-  verifier,
-  extractClaims = splitClaims,
+  answer, evidence, verifier, extractClaims = splitClaims,
 }: VerifyAnswerInput): Promise<AnswerVerification> {
   const claims = await extractClaims(answer);
-  const validEvidenceIds = new Set(evidence.map((item) => item.id));
-
-  const verified = await Promise.all(
-    claims.map(async (claim, index) => {
-      const result = await verifier.verify({ claim, evidence });
-      // Validate that returned evidenceIds only contain IDs present in supplied evidence
-      const safeEvidenceIds = (result.evidenceIds ?? []).filter((id) =>
-        validEvidenceIds.has(id),
-      );
-      return {
-        ...result,
-        evidenceIds: safeEvidenceIds,
-        index,
-      };
-    }),
-  );
-
+  if (!Array.isArray(claims) || !claims.every(item => typeof item === "string")) {
+    throw new TypeError("Claim extractor must return an array of strings");
+  }
+  const inputs = claims.map(claim => ({ claim, evidence }));
+  const verified: Verification[] = supportsBatch(verifier)
+    ? await verifier.verifyMany(inputs)
+    : await Promise.all(inputs.map(input => verifier.verify(input)));
+  if (verified.length !== claims.length) {
+    throw new Error("Verifier returned wrong number of claim results");
+  }
+  const allowed = new Set(evidence.map(item => item.id));
+  const results = verified.map((item, index) => {
+    if (!item || item.claim !== claims[index]) {
+      throw new Error("Verifier returned out-of-order or unrelated claim result");
+    }
+    return {
+      ...item,
+      evidenceIds: item.evidenceIds.filter(id => allowed.has(id)),
+      index,
+    };
+  });
   return {
-    verdict: aggregateVerdict(verified),
-    probabilities: aggregateProbabilities(verified),
-    claims: verified,
+    verdict: aggregateVerdict(results),
+    probabilities: aggregateProbabilities(results),
+    claims: results,
   };
 }
