@@ -70,7 +70,7 @@ export class ShadowVerifier implements Verifier {
         rubricVersion: this.options.policy.rubricVersion,
         policyId: this.options.policy.id,
         // Execution failures are NOT factuality classifications.
-        policyDecision: "REVIEW",
+        policyDecision: "REVIEW" as const,
         reasons: [`Provider error: ${errorClass}`],
         escalationPath: this.options.policy.escalationPaths?.REVIEW ?? "flag_for_audit",
         fallbackPath: this.options.policy.fallbackPath,
