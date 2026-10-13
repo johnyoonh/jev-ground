@@ -33,7 +33,9 @@ export function isTransientError(error: unknown): boolean {
   const status = statusOf(error);
   if (status !== undefined) return RETRYABLE_STATUS.has(status);
   const code = codeOf(error);
-  return code !== undefined && RETRYABLE_CODE.has(code);
+  if (code !== undefined && RETRYABLE_CODE.has(code)) return true;
+  const name = asRecord(error)?.name;
+  return name === "APIConnectionError" || name === "APITimeoutError";
 }
 function retryAfterMs(error: unknown, nowMs: number): number | undefined {
   const record = asRecord(error);
