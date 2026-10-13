@@ -2,9 +2,13 @@ import { aggregateProbabilities, aggregateVerdict } from "./aggregate.js";
 import { splitClaims, type ClaimExtractor } from "./claims.js";
 import type {
   AnswerVerification,
+  ClaimVerification,
   Evidence,
+  Verification,
   Verifier,
+  VerifyClaimInput,
 } from "./types.js";
+import { isBatchVerifier } from "./types.js";
 
 export interface VerifyAnswerInput {
   answer: string;
@@ -21,12 +25,29 @@ export async function verifyAnswer({
 }: VerifyAnswerInput): Promise<AnswerVerification> {
   const claims = await extractClaims(answer);
 
-  const verified = await Promise.all(
-    claims.map(async (claim, index) => ({
-      ...(await verifier.verify({ claim, evidence })),
-      index,
-    })),
-  );
+  if (claims.length === 0) {
+    return {
+      verdict: aggregateVerdict([]),
+      probabilities: aggregateProbabilities([]),
+      claims: [],
+    };
+  }
+
+  const inputs: VerifyClaimInput[] = claims.map((claim) => ({ claim, evidence }));
+
+  let verifiedList: Verification[];
+  if (isBatchVerifier(verifier)) {
+    verifiedList = await verifier.verifyMany(inputs);
+  } else {
+    verifiedList = await Promise.all(
+      inputs.map((input) => verifier.verify(input)),
+    );
+  }
+
+  const verified: ClaimVerification[] = verifiedList.map((item, index) => ({
+    ...item,
+    index,
+  }));
 
   return {
     verdict: aggregateVerdict(verified),

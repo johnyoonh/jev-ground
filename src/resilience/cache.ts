@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import path from "node:path";
-import type { Verification, Verifier, VerifyClaimInput } from "../types.js";
+import type { BatchVerifier, Verification, Verifier, VerifyClaimInput } from "../types.js";
+import { isBatchVerifier } from "../types.js";
 
 export interface VerificationCacheEntry {
   storedAt: number;
@@ -80,7 +81,7 @@ export interface CachedVerifierOptions {
   ttlMs?: number;
   now?: () => number;
 }
-export class CachedVerifier implements Verifier {
+export class CachedVerifier implements BatchVerifier {
   readonly stats = { hits: 0, misses: 0, shared: 0, cacheErrors: 0 };
   private readonly pending = new Map<string, Promise<Verification>>();
   private readonly now: () => number;
@@ -115,5 +116,60 @@ export class CachedVerifier implements Verifier {
     try { await this.options.cache.set(key, { storedAt: this.now(), value: result }); }
     catch { this.stats.cacheErrors++; }
     return { ...result, cacheHit: false };
+  }
+
+  async verifyMany(inputs: VerifyClaimInput[]): Promise<Verification[]> {
+    if (inputs.length === 0) return [];
+
+    const results: Array<Verification | undefined> = new Array(inputs.length);
+    const misses: Array<{ index: number; input: VerifyClaimInput; key: string }> = [];
+
+    for (let i = 0; i < inputs.length; i++) {
+      const input = inputs[i];
+      const key = verificationCacheKey(this.options.namespace, input);
+      let record: VerificationCacheEntry | undefined;
+      try {
+        record = await this.options.cache.get(key);
+      } catch {
+        this.stats.cacheErrors++;
+      }
+
+      if (record && this.now() - record.storedAt <= this.ttlMs) {
+        this.stats.hits++;
+        results[i] = { ...record.value, cacheHit: true };
+      } else {
+        misses.push({ index: i, input, key });
+      }
+    }
+
+    if (misses.length > 0) {
+      this.stats.misses += misses.length;
+      const missInputs = misses.map((m) => m.input);
+      let fetched: Verification[];
+
+      if (isBatchVerifier(this.delegate)) {
+        fetched = await this.delegate.verifyMany(missInputs);
+      } else {
+        fetched = await Promise.all(
+          missInputs.map((input) => this.delegate.verify(input)),
+        );
+      }
+
+      for (let j = 0; j < misses.length; j++) {
+        const { index, key } = misses[j];
+        const res = fetched[j];
+        try {
+          await this.options.cache.set(key, {
+            storedAt: this.now(),
+            value: res,
+          });
+        } catch {
+          this.stats.cacheErrors++;
+        }
+        results[index] = { ...res, cacheHit: false };
+      }
+    }
+
+    return results as Verification[];
   }
 }

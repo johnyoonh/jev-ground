@@ -1,4 +1,5 @@
-import type { Verification, Verifier, VerifyClaimInput } from "../types.js";
+import type { BatchVerifier, Verification, Verifier, VerifyClaimInput } from "../types.js";
+import { isBatchVerifier } from "../types.js";
 
 export interface RetryOptions {
   maxAttempts?: number;
@@ -52,7 +53,7 @@ function retryAfterMs(error: unknown, nowMs: number): number | undefined {
   const date = Date.parse(input);
   return Number.isNaN(date) ? undefined : Math.max(0, date - nowMs);
 }
-export class RetryingVerifier implements Verifier {
+export class RetryingVerifier implements BatchVerifier {
   readonly stats = { calls: 0, attempts: 0, retries: 0 };
   private readonly options: Required<Pick<RetryOptions,
     "maxAttempts" | "baseDelayMs" | "maxDelayMs" | "random" | "sleep" | "shouldRetry"
@@ -80,6 +81,34 @@ export class RetryingVerifier implements Verifier {
       this.stats.attempts++;
       try {
         return await this.delegate.verify(input);
+      } catch (error) {
+        if (attempt === this.options.maxAttempts || !this.options.shouldRetry(error)) throw error;
+        const exponential = Math.min(this.options.maxDelayMs,
+          this.options.baseDelayMs * 2 ** (attempt - 1));
+        const jitter = Math.max(0, Math.min(1, this.options.random()));
+        const wait = Math.min(this.options.maxDelayMs,
+          Math.max(exponential * (0.5 + 0.5 * jitter), retryAfterMs(error, Date.now()) ?? 0));
+        this.stats.retries++;
+        this.options.onRetry?.(error, attempt, wait);
+        await this.options.sleep(wait);
+      }
+    }
+    throw new Error("Unreachable retry state");
+  }
+
+  async verifyMany(inputs: VerifyClaimInput[]): Promise<Verification[]> {
+    if (inputs.length === 0) return [];
+    this.stats.calls++;
+    for (let attempt = 1; attempt <= this.options.maxAttempts; attempt++) {
+      this.stats.attempts++;
+      try {
+        if (isBatchVerifier(this.delegate)) {
+          return await this.delegate.verifyMany(inputs);
+        } else {
+          return await Promise.all(
+            inputs.map((input) => this.delegate.verify(input)),
+          );
+        }
       } catch (error) {
         if (attempt === this.options.maxAttempts || !this.options.shouldRetry(error)) throw error;
         const exponential = Math.min(this.options.maxDelayMs,

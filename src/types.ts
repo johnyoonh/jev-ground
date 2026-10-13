@@ -36,6 +36,14 @@ export interface Verifier {
   verify(input: VerifyClaimInput): Promise<Verification>;
 }
 
+export interface BatchVerifier extends Verifier {
+  verifyMany(inputs: VerifyClaimInput[]): Promise<Verification[]>;
+}
+
+export function isBatchVerifier(verifier: Verifier): verifier is BatchVerifier {
+  return typeof (verifier as BatchVerifier).verifyMany === "function";
+}
+
 export interface ClaimVerification extends Verification {
   index: number;
 }
