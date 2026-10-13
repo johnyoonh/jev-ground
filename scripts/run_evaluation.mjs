@@ -80,7 +80,14 @@ async function main() {
   const report = await runBenchmark({
     verifier, dataset: subset, verifierName: opts.model, outputPath: opts.output,
   });
-  console.log("Accuracy:", report.accuracy, "macro-F1:", report.macroMetrics.f1);
+  const failures = report.predictions.filter(p => p.error).length;
+  if (failures > 0) {
+    console.error("WARNING:", failures, "provider failures; the current benchmark runner may count these as insufficient.");
+    console.error("Accuracy/F1 are NOT valid until failed calls are excluded from scored predictions.");
+    process.exitCode = 1;
+  } else {
+    console.log("Accuracy:", report.accuracy, "macro-F1:", report.macroMetrics.f1);
+  }
   console.log("Retries:", retried.stats, "cache:", "stats" in verifier ? verifier.stats : "disabled");
   console.log("Output:", opts.output);
 }
