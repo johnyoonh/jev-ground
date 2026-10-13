@@ -11,13 +11,23 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:smoke": "node -e 'import(\"./dist/index.js\").then((m) => { const required = [\"JevVerifier\", \"verifyAnswer\", \"splitClaims\", \"aggregateVerdict\", \"aggregateProbabilities\"]; for (const name of required) { if (!(name in m)) throw new Error(\"Missing export: \" + name); } new m.JevVerifier(); console.log(\"Smoke test passed\"); }).catch((err) => { console.error(err); process.exit(1); })'"
   },
-  "keywords": ["jev", "typesafe", "hallucination", "factuality", "rag", "verification"],
+  "keywords": [
+    "jev",
+    "typesafe",
+    "hallucination",
+    "factuality",
+    "rag",
+    "verification"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">=20"
@@ -26,6 +36,7 @@
     "@typesafe-ai/sdk": "^0.6.0"
   },
   "devDependencies": {
+    "@types/node": "^26.6.2",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
   }
