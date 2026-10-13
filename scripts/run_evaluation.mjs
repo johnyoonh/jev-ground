@@ -62,8 +62,8 @@ function parseArgs(argv) {
     args[key] = Number(args[key]);
     if (!Number.isFinite(args[key]) || args[key] < 0) throw new Error("Invalid "+key);
   }
-  if (args.maxEstimatedUsd !== null && args.usdPer1000EstimatedTokens === null) {
-    throw new Error("--max-estimated-usd requires --usd-per-1000-estimated-tokens");
+  if (args.maxEstimatedUsd !== null && !(args.usdPer1000EstimatedTokens > 0)) {
+    throw new Error("--max-estimated-usd requires a positive --usd-per-1000-estimated-tokens");
   }
   if (!args.dataset) throw new Error("--dataset is required");
   if (!Number.isInteger(args.maxExamples) || args.maxExamples < 1 || args.maxExamples > 10000) {
