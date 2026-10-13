@@ -1,3 +1,8 @@
+node_modules/
+**/node_modules/
+dist/
+.cache/
+*.log
 
 # Beads / Dolt files (added by bd init)
 .dolt/

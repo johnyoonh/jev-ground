@@ -43,6 +43,8 @@ function asVerdict(choiceValue: string): VerificationVerdict {
 }
 
 export class JevVerifier implements Verifier {
+  readonly isLocal = false;
+  readonly provider = "jev";
   private readonly client: TypeSafeClient;
   private readonly model?: string;
 
@@ -51,7 +53,7 @@ export class JevVerifier implements Verifier {
     this.model = options.model;
   }
 
-  async verify({ claim, evidence }: VerifyClaimInput): Promise<Verification> {
+  async verify({ claim, evidence, noStore }: VerifyClaimInput): Promise<Verification> {
     const response = await this.client.systemOne({
       state: {
         claim,
@@ -83,7 +85,7 @@ export class JevVerifier implements Verifier {
         ),
       evidenceIds: evidence.map((item) => item.id),
       provider: "jev",
-      raw: answer,
+      raw: noStore ? undefined : answer,
     };
   }
 }

@@ -57,6 +57,14 @@ export class RetryingVerifier implements Verifier {
   private readonly options: Required<Pick<RetryOptions,
     "maxAttempts" | "baseDelayMs" | "maxDelayMs" | "random" | "sleep" | "shouldRetry"
   >> & Pick<RetryOptions, "onRetry">;
+  get isLocal(): boolean | undefined {
+    return this.delegate.isLocal;
+  }
+
+  get provider(): string | undefined {
+    return this.delegate.provider;
+  }
+
   constructor(private readonly delegate: Verifier, options: RetryOptions = {}) {
     this.options = {
       maxAttempts: options.maxAttempts ?? 4,

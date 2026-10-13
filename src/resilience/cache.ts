@@ -7,10 +7,24 @@ export interface VerificationCacheEntry {
   storedAt: number;
   value: Verification;
 }
+
+export interface PurgeOptions {
+  /** Delete entries older than maxAgeMs relative to current time. */
+  maxAgeMs?: number;
+  /** Delete entries that have exceeded TTL. */
+  expiredOnly?: boolean;
+  /** TTL in milliseconds to determine expiration. */
+  ttlMs?: number;
+  /** Custom time provider. */
+  now?: () => number;
+}
+
 export interface VerificationCache {
   get(key: string): Promise<VerificationCacheEntry | undefined>;
   set(key: string, entry: VerificationCacheEntry): Promise<void>;
+  purge?(options?: PurgeOptions): Promise<number>;
 }
+
 /** No persistence: useful for tests or sensitive workloads. */
 export class MemoryVerificationCache implements VerificationCache {
   private readonly entries = new Map<string, VerificationCacheEntry>();
@@ -20,8 +34,40 @@ export class MemoryVerificationCache implements VerificationCache {
   async set(key: string, entry: VerificationCacheEntry): Promise<void> {
     this.entries.set(key, entry);
   }
+  async purge(options: PurgeOptions = {}): Promise<number> {
+    const now = options.now ? options.now() : Date.now();
+    let count = 0;
+    for (const [key, entry] of this.entries.entries()) {
+      let remove = false;
+      if (options.maxAgeMs !== undefined && now - entry.storedAt >= options.maxAgeMs) {
+        remove = true;
+      }
+      if (options.expiredOnly && options.ttlMs !== undefined && now - entry.storedAt > options.ttlMs) {
+        remove = true;
+      }
+      if (remove) {
+        this.entries.delete(key);
+        count++;
+      }
+    }
+    return count;
+  }
 }
-/** File persistence is explicit opt-in. Cache files can contain the original claim. */
+
+/**
+ * File persistence is explicit opt-in.
+ *
+ * SECURITY WARNING & PLAINTEXT-AT-REST RISKS:
+ * `FileVerificationCache` stores claims, verdicts, confidence scores, and evidence IDs in unencrypted
+ * JSON files on disk. If claims or evidence contain sensitive information or PII, that content will
+ * be stored in plaintext.
+ *
+ * Mitigations:
+ * 1. Restrict filesystem access (this class creates directories with 0700 and files with 0600 mode).
+ * 2. Use `noStore: true` on sensitive requests to bypass caching completely.
+ * 3. Use `purge()` periodically or on application shutdown to clean up stale/expired cache entries.
+ * 4. Raw provider responses are never written to disk by default.
+ */
 export class FileVerificationCache implements VerificationCache {
   constructor(private readonly directory: string) {}
   private fileFor(key: string): string {
@@ -53,6 +99,69 @@ export class FileVerificationCache implements VerificationCache {
     } finally {
       await fs.rm(temp, { force: true }).catch(() => undefined);
     }
+  }
+
+  /**
+   * Purges cache files based on age or expiration criteria.
+   * Returns the total number of cache files removed.
+   */
+  async purge(options: PurgeOptions = {}): Promise<number> {
+    const now = options.now ? options.now() : Date.now();
+    let removedCount = 0;
+
+    let subdirs: string[];
+    try {
+      subdirs = await fs.readdir(this.directory);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+      throw error;
+    }
+
+    for (const subdir of subdirs) {
+      const subdirPath = path.join(this.directory, subdir);
+      let files: string[];
+      try {
+        files = await fs.readdir(subdirPath);
+      } catch {
+        continue;
+      }
+
+      for (const file of files) {
+        if (!file.endsWith(".json")) continue;
+        const filePath = path.join(subdirPath, file);
+        try {
+          const contents = await fs.readFile(filePath, "utf8");
+          const record = JSON.parse(contents);
+          if (isCacheEntry(record)) {
+            let remove = false;
+            if (options.maxAgeMs !== undefined && now - record.storedAt >= options.maxAgeMs) {
+              remove = true;
+            }
+            if (options.expiredOnly && options.ttlMs !== undefined && now - record.storedAt > options.ttlMs) {
+              remove = true;
+            }
+            if (remove) {
+              await fs.rm(filePath, { force: true });
+              removedCount++;
+            }
+          }
+        } catch {
+          // Ignore parse or read error during purge
+        }
+      }
+
+      // Try cleaning up empty subdirectories
+      try {
+        const remaining = await fs.readdir(subdirPath);
+        if (remaining.length === 0) {
+          await fs.rmdir(subdirPath);
+        }
+      } catch {
+        // Ignore rmdir error
+      }
+    }
+
+    return removedCount;
   }
 }
 function isCacheEntry(value: unknown): value is VerificationCacheEntry {
@@ -91,7 +200,22 @@ export class CachedVerifier implements Verifier {
     if (this.ttlMs < 0 || Number.isNaN(this.ttlMs)) throw new RangeError("ttlMs must be nonnegative");
     this.now = options.now ?? Date.now;
   }
+  get isLocal(): boolean | undefined {
+    return this.delegate.isLocal;
+  }
+
+  get provider(): string | undefined {
+    return this.delegate.provider;
+  }
+
   async verify(input: VerifyClaimInput): Promise<Verification> {
+    if (input.noStore) {
+      this.stats.misses++;
+      const result = await this.delegate.verify(input);
+      const { raw: _raw, ...safeResult } = result;
+      return { ...safeResult, cacheHit: false };
+    }
+
     const key = verificationCacheKey(this.options.namespace, input);
     const inFlight = this.pending.get(key);
     if (inFlight) {
@@ -102,6 +226,7 @@ export class CachedVerifier implements Verifier {
     this.pending.set(key, work);
     try { return await work; } finally { this.pending.delete(key); }
   }
+
   private async verifyOnce(key: string, input: VerifyClaimInput): Promise<Verification> {
     let record: VerificationCacheEntry | undefined;
     try { record = await this.options.cache.get(key); }
@@ -112,8 +237,10 @@ export class CachedVerifier implements Verifier {
     }
     this.stats.misses++;
     const result = await this.delegate.verify(input);
-    try { await this.options.cache.set(key, { storedAt: this.now(), value: result }); }
-    catch { this.stats.cacheErrors++; }
+    if (!input.noStore) {
+      try { await this.options.cache.set(key, { storedAt: this.now(), value: result }); }
+      catch { this.stats.cacheErrors++; }
+    }
     return { ...result, cacheHit: false };
   }
 }
