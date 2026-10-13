@@ -159,21 +159,32 @@ export async function runReliableBenchmark(
   const pending = items.map((_, index) => index).filter(i => !slots[i]);
   let cursor = 0;
   let aborted = false;
+  let budgetExhausted = false;
   async function worker(): Promise<void> {
     while (cursor < pending.length) {
       if (opts.signal?.aborted) { aborted = true; return; }
+      if (budgetExhausted) return;
       const index = pending[cursor++];
       const prediction = await evaluate(index, opts.verifier);
       slots[index] = prediction;
       await persist(index, prediction);
       completed++;
       opts.onProgress?.(completed, items.length);
+      // Budget exhaustion is an execution state. Do not launch further cases,
+      // and leave successfully finished records available for exact resume.
+      if (prediction.error?.startsWith("ProviderBudgetExceededError:")) {
+        budgetExhausted = true;
+        return;
+      }
     }
   }
   const threads = Math.min(opts.concurrency ?? 4, pending.length);
   await Promise.all(Array.from({ length: threads }, () => worker()));
   if (aborted || opts.signal?.aborted) {
     throw new Error("Evaluation aborted; successful checkpoint records preserved");
+  }
+  if (budgetExhausted) {
+    throw new Error("Evaluation stopped by provider request budget; checkpoint preserved for --resume");
   }
   const predictions = slots.map((prediction, index) => {
     if (!prediction) throw new Error("Missing benchmark result " + index);

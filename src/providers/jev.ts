@@ -22,7 +22,19 @@ export class InvalidJevResponseError extends Error {
   }
 }
 
+export interface JevRequestInfo {
+  model: string;
+  claimCount: number;
+  questionCount: number;
+  /** Approximate serialized request size, not API-token usage. */
+  payloadChars: number;
+}
 export interface JevVerifierOptions {
+  /**
+   * Synchronous admission hook immediately before every SDK request, including
+   * retries and internal batch chunks. Throw to block the request.
+   */
+  beforeRequest?: (request: JevRequestInfo) => void;
   client?: TypeSafeClient;
   apiKey?: string;
   model?: string;
@@ -124,6 +136,7 @@ export class JevVerifier implements BatchVerifier {
   private readonly model: string;
   private readonly maxQuestions: number;
   private readonly maxChars: number;
+  private readonly beforeRequest?: (request: JevRequestInfo) => void;
   /** Useful when configuring a cache. Pin an explicit model version for persistent caches. */
   readonly cacheNamespace: string;
 
@@ -133,6 +146,7 @@ export class JevVerifier implements BatchVerifier {
     this.model = options.model ?? "jev-latest";
     this.maxQuestions = options.maxQuestionsPerRequest ?? 64;
     this.maxChars = options.maxStateChars ?? 40000;
+    this.beforeRequest = options.beforeRequest;
     if (!Number.isInteger(this.maxQuestions) || this.maxQuestions < 1 ||
         !Number.isInteger(this.maxChars) || this.maxChars < 1) {
       throw new RangeError("Invalid Jev request limits");
@@ -211,12 +225,17 @@ export class JevVerifier implements BatchVerifier {
       }
     }
 
-    const response = await this.getClient().systemOne({
-      model: this.model,
-      state: single
-        ? { claim: inputs[0].claim, evidence }
-        : { claims: inputs.map(input => input.claim), evidence },
-      questions,
+    const client = this.getClient();
+    const state = single
+      ? { claim: inputs[0].claim, evidence }
+      : { claims: inputs.map(input => input.claim), evidence };
+    this.beforeRequest?.({
+      model: this.model, claimCount: inputs.length,
+      questionCount: Object.keys(questions).length,
+      payloadChars: JSON.stringify({ model: this.model, state, questions }).length,
+    });
+    const response = await client.systemOne({
+      model: this.model, state, questions,
     }, { retry: { maxRetries: 0 } });
     const answers = record(response.answers);
     if (!answers) {
