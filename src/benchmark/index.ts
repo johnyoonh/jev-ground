@@ -5,3 +5,4 @@ export * from "./runner.js";
 export * from "./cli.js";
 export * from "./reliable.js";
 export * from "./adversarial.js";
+export * from "./batching.js";

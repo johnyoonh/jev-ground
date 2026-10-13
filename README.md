@@ -210,6 +210,10 @@ See [evaluation datasets](docs/evaluation-datasets.md) for setup and licenses.
 
 For a 32-case synthetic adversarial/metamorphic suite, run `npm run benchmark:adversarial` (mock only); see [adversarial evaluation](docs/adversarial-evaluation.md). Do not interpret a mock score as live accuracy.
 
+## Synthetic batching comparison
+
+For a non-billable request-count test (not Jev latency), run `npm run benchmark:batching` and see [the batching guide](docs/batching-benchmark.md).
+
 ## Development
 
 ```bash
