@@ -1,0 +1,24 @@
+name: Evaluation data adapter tests
+
+on:
+  push:
+    paths:
+      - "scripts/prepare_eval.py"
+      - "test/test_prepare_eval.py"
+      - ".github/workflows/eval-data.yml"
+  pull_request:
+    paths:
+      - "scripts/prepare_eval.py"
+      - "test/test_prepare_eval.py"
+      - ".github/workflows/eval-data.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run fully offline conversion tests
+        run: python -m unittest discover -s test -p 'test_prepare_eval.py' -v
