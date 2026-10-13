@@ -4,8 +4,8 @@ import { performance } from "node:perf_hooks";
 import { loadJsonlDataset } from "./dataset.js";
 import {
   aggregateTokenCost,
-  computeCalibrationMetrics,
   computeClassMetrics,
+  computeCalibrationMetrics,
   computeConfusionMatrix,
   computeLatencyMetrics,
   VERDICTS,
@@ -15,7 +15,6 @@ import type {
   BenchmarkOptions,
   BenchmarkPrediction,
   BenchmarkResult,
-  LatencyMetrics,
 } from "./types.js";
 
 export async function runBenchmark({
@@ -34,8 +33,7 @@ export async function runBenchmark({
 
   const predictions: BenchmarkPrediction[] = [];
   const latencies: number[] = [];
-
-  const overallStartTime = performance.now();
+  const startRun = performance.now();
 
   for (const item of items) {
     const startTime = performance.now();
@@ -66,75 +64,40 @@ export async function runBenchmark({
     }
   }
 
-  const overallEndTime = performance.now();
-  const totalExecutionTimeSec = (overallEndTime - overallStartTime) / 1000;
-
-  const scoredPredictions = predictions.filter(
-    (p) => !p.error && p.verification !== undefined,
-  );
-  const failedPredictions = predictions.filter(
-    (p) => p.error !== undefined || !p.verification,
-  );
-
-  const scoredCount = scoredPredictions.length;
-  const failedCount = failedPredictions.length;
-  const failureRate =
-    items.length > 0 ? Math.round((failedCount / items.length) * 10000) / 10000 : 0;
-  const throughput =
-    totalExecutionTimeSec > 0
-      ? Math.round((items.length / totalExecutionTimeSec) * 100) / 100
-      : 0;
-
-  const errorBreakdown: Record<string, number> = {};
-  for (const failed of failedPredictions) {
-    const errMsg = failed.error ?? "Unknown error";
-    errorBreakdown[errMsg] = (errorBreakdown[errMsg] ?? 0) + 1;
-  }
-
   const confusionMatrix = computeConfusionMatrix(predictions);
   const { perClassMetrics, macroMetrics, accuracy } =
     computeClassMetrics(confusionMatrix);
-  const calibration = computeCalibrationMetrics(predictions);
-
   const latency = computeLatencyMetrics(latencies);
-
-  let cachedLatency: LatencyMetrics | undefined;
-  let uncachedLatency: LatencyMetrics | undefined;
-
-  const cachedLatencies = predictions
-    .filter((p) => p.verification?.cacheHit === true)
-    .map((p) => p.latencyMs);
-
-  const uncachedLatencies = predictions
-    .filter((p) => p.verification && p.verification.cacheHit !== true)
-    .map((p) => p.latencyMs);
-
-  if (cachedLatencies.length > 0) {
-    cachedLatency = computeLatencyMetrics(cachedLatencies);
+  const success = predictions.filter(p => p.verification && !p.error);
+  const failures = predictions.filter(p => p.error || !p.verification);
+  const calibration = computeCalibrationMetrics(predictions);
+  const errorBreakdown: Record<string, number> = {};
+  for (const p of failures) {
+    const reason = p.error?.split(":")[0] ?? "MissingVerification";
+    errorBreakdown[reason] = (errorBreakdown[reason] ?? 0) + 1;
   }
-  if (uncachedLatencies.length > 0) {
-    uncachedLatency = computeLatencyMetrics(uncachedLatencies);
-  }
-
+  const cached = success.filter(p => p.verification?.cacheHit === true).map(p => p.latencyMs);
+  const uncached = success.filter(p => p.verification?.cacheHit !== true).map(p => p.latencyMs);
+  const seconds = (performance.now() - startRun) / 1000;
   const tokenCost = aggregateTokenCost(predictions);
 
   const result: BenchmarkResult = {
     timestamp: new Date().toISOString(),
     verifierName: resolvedName,
     datasetSize: items.length,
-    scoredCount,
-    failedCount,
-    failureRate,
-    throughput,
+    scored: success.length,
+    failed: failures.length,
+    failureRate: items.length ? failures.length / items.length : 0,
+    throughput: seconds > 0 ? items.length / seconds : 0,
     errorBreakdown,
+    ...(calibration ? { calibration } : {}),
+    ...(cached.length ? { cachedLatency: computeLatencyMetrics(cached) } : {}),
+    ...(uncached.length ? { uncachedLatency: computeLatencyMetrics(uncached) } : {}),
     accuracy,
     macroMetrics,
     perClassMetrics,
     confusionMatrix,
-    calibration,
     latency,
-    ...(cachedLatency ? { cachedLatency } : {}),
-    ...(uncachedLatency ? { uncachedLatency } : {}),
     ...(tokenCost ? { tokenCost } : {}),
     predictions,
   };
@@ -156,18 +119,14 @@ export function formatConsoleSummary(result: BenchmarkResult): string {
   lines.push(` Factuality Benchmark Summary: ${result.verifierName}`);
   lines.push("=================================================");
   lines.push(`Timestamp:    ${result.timestamp}`);
-  lines.push(
-    `Dataset Size: ${result.datasetSize} samples (Scored: ${result.scoredCount}, Failed: ${result.failedCount}, Failure Rate: ${(result.failureRate * 100).toFixed(2)}%)`,
-  );
-  lines.push(`Throughput:   ${result.throughput.toFixed(2)} items/sec`);
-  lines.push(`Accuracy:     ${(result.accuracy * 100).toFixed(2)}%`);
+  lines.push(`Dataset Size: ${result.datasetSize} samples`);
+  lines.push(`Scored: ${result.scored} | Provider failures: ${result.failed} | Failure rate: ${((result.failureRate ?? 0)*100).toFixed(1)}%`);
+  lines.push(result.scored > 0 ? `Accuracy:     ${(result.accuracy * 100).toFixed(2)}%` : "Accuracy:     N/A (no valid model predictions)");
   lines.push(
     `Macro Avg:    Precision: ${(result.macroMetrics.precision * 100).toFixed(2)}% | Recall: ${(result.macroMetrics.recall * 100).toFixed(2)}% | F1: ${(result.macroMetrics.f1 * 100).toFixed(2)}%`,
   );
-  lines.push(
-    `Calibration:  ECE: ${result.calibration.ece.toFixed(4)} | Brier Score: ${result.calibration.brierScore.toFixed(4)}`,
-  );
   lines.push("");
+  if (result.calibration) lines.push(`Calibration: ECE ${result.calibration.ece.toFixed(4)} | Brier ${result.calibration.brierScore.toFixed(4)}`);
   lines.push("--- Per-Class Metrics ---");
   lines.push(
     `${"Class".padEnd(14)} | ${"Precision".padStart(9)} | ${"Recall".padStart(9)} | ${"F1".padStart(9)} | ${"Support".padStart(7)}`,
@@ -198,28 +157,8 @@ export function formatConsoleSummary(result: BenchmarkResult): string {
   lines.push("");
   lines.push("--- Latency ---");
   lines.push(
-    `Overall:  Total: ${result.latency.totalMs.toFixed(2)} ms | Mean: ${result.latency.meanMs.toFixed(2)} ms | Median: ${result.latency.medianMs.toFixed(2)} ms | Min: ${result.latency.minMs.toFixed(2)} ms | Max: ${result.latency.maxMs.toFixed(2)} ms | P95: ${result.latency.p95Ms.toFixed(2)} ms`,
+    `Total: ${result.latency.totalMs.toFixed(2)} ms | Mean: ${result.latency.meanMs.toFixed(2)} ms | Median: ${result.latency.medianMs.toFixed(2)} ms | Min: ${result.latency.minMs.toFixed(2)} ms | Max: ${result.latency.maxMs.toFixed(2)} ms | P95: ${result.latency.p95Ms.toFixed(2)} ms`,
   );
-
-  if (result.cachedLatency) {
-    lines.push(
-      `Cached:   Mean: ${result.cachedLatency.meanMs.toFixed(2)} ms | Median: ${result.cachedLatency.medianMs.toFixed(2)} ms | P95: ${result.cachedLatency.p95Ms.toFixed(2)} ms`,
-    );
-  }
-
-  if (result.uncachedLatency) {
-    lines.push(
-      `Uncached: Mean: ${result.uncachedLatency.meanMs.toFixed(2)} ms | Median: ${result.uncachedLatency.medianMs.toFixed(2)} ms | P95: ${result.uncachedLatency.p95Ms.toFixed(2)} ms`,
-    );
-  }
-
-  if (result.failedCount > 0 && Object.keys(result.errorBreakdown).length > 0) {
-    lines.push("");
-    lines.push("--- Provider Error Breakdown ---");
-    for (const [err, count] of Object.entries(result.errorBreakdown)) {
-      lines.push(`  ${err}: ${count}`);
-    }
-  }
 
   if (result.tokenCost) {
     lines.push("");

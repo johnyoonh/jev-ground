@@ -19,6 +19,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:smoke": "node -e 'import(\"./dist/index.js\").then((m) => { const required = [\"JevVerifier\", \"verifyAnswer\", \"splitClaims\", \"aggregateVerdict\", \"aggregateProbabilities\"]; for (const name of required) { if (!(name in m)) throw new Error(\"Missing export: \" + name); } new m.JevVerifier(); console.log(\"Smoke test passed\"); }).catch((err) => { console.error(err); process.exit(1); })'",
     "benchmark": "npm run build && node dist/benchmark/cli.js"
   },
   "keywords": [
@@ -38,7 +39,7 @@
     "@typesafe-ai/sdk": "^0.6.0"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0",
+    "@types/node": "^26.6.2",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
   }

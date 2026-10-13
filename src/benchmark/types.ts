@@ -58,11 +58,14 @@ export interface BenchmarkResult {
   timestamp: string;
   verifierName: string;
   datasetSize: number;
-  scoredCount: number;
-  failedCount: number;
-  failureRate: number;
-  throughput: number;
-  errorBreakdown: Record<string, number>;
+  scored: number;
+  failed: number;
+  failureRate?: number;
+  throughput?: number;
+  errorBreakdown?: Record<string, number>;
+  calibration?: CalibrationMetrics;
+  cachedLatency?: LatencyMetrics;
+  uncachedLatency?: LatencyMetrics;
   accuracy: number;
   macroMetrics: {
     precision: number;
@@ -71,10 +74,7 @@ export interface BenchmarkResult {
   };
   perClassMetrics: Record<VerificationVerdict, ClassMetrics>;
   confusionMatrix: ConfusionMatrix;
-  calibration: CalibrationMetrics;
   latency: LatencyMetrics;
-  cachedLatency?: LatencyMetrics;
-  uncachedLatency?: LatencyMetrics;
   tokenCost?: TokenCostMetrics;
   predictions: BenchmarkPrediction[];
 }

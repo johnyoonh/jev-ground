@@ -28,14 +28,10 @@ export function computeConfusionMatrix(
   const matrix = createEmptyConfusionMatrix();
 
   for (const pred of predictions) {
-    if (pred.error || !pred.verification) {
-      continue;
-    }
     const gold = pred.item.goldVerdict;
+    if (pred.error || !pred.verification) continue; // Provider errors are not a factuality class.
     const predicted = pred.verification.verdict;
-    if (VERDICTS.includes(predicted)) {
-      matrix[gold][predicted] += 1;
-    }
+    matrix[gold][predicted] += 1;
   }
 
   return matrix;
@@ -119,10 +115,10 @@ export function computeClassMetrics(confusionMatrix: ConfusionMatrix): {
 
 export function computeCalibrationMetrics(
   predictions: BenchmarkPrediction[],
-): CalibrationMetrics {
+): CalibrationMetrics | undefined {
   const scored = predictions.filter((p) => !p.error && p.verification);
   if (scored.length === 0) {
-    return { ece: 0, brierScore: 0 };
+    return undefined;
   }
 
   let totalBrier = 0;
@@ -235,15 +231,12 @@ export function aggregateTokenCost(
   let hasTokenCostData = false;
 
   for (const pred of predictions) {
-    if (pred.error || !pred.verification) {
-      continue;
-    }
-
     let pTokens = pred.tokens?.promptTokens;
     let cTokens = pred.tokens?.completionTokens;
     let tTokens = pred.tokens?.totalTokens;
     let itemCost = pred.cost;
 
+    // Check verification.raw for metadata if not directly in pred
     if (pred.verification?.raw && typeof pred.verification.raw === "object") {
       const raw = pred.verification.raw as Record<string, unknown>;
 
