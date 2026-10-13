@@ -30,6 +30,10 @@ function codeOf(error: unknown): string | undefined {
   return typeof code === "string" ? code : undefined;
 }
 export function isTransientError(error: unknown): boolean {
+  const record = asRecord(error);
+  if (record?.name === "BudgetExhaustedError" || record?.name === "CircuitBreakerOpenError") {
+    return false;
+  }
   const status = statusOf(error);
   if (status !== undefined) return RETRYABLE_STATUS.has(status);
   const code = codeOf(error);
