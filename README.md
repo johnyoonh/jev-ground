@@ -206,6 +206,10 @@ after interruption. Keep checkpoint data private: it contains source evidence.
 
 See [evaluation datasets](docs/evaluation-datasets.md) for setup and licenses.
 
+## Adversarial regression
+
+For a 32-case synthetic adversarial/metamorphic suite, run `npm run benchmark:adversarial` (mock only); see [adversarial evaluation](docs/adversarial-evaluation.md). Do not interpret a mock score as live accuracy.
+
 ## Development
 
 ```bash
